@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RPS Dataset Toplama</title>
+<style>
+  :root { --bg:#f6f5f2; --card:#fff; --ink:#1d1d1f; --muted:#6b6b70; --line:#e3e1dc;
+          --rock:#c2410c; --paper:#1d4ed8; --scissors:#15803d; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width:1100px; margin:0 auto; padding:20px 16px 40px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .sub { color:var(--muted); margin:0 0 18px; }
+  .grid { display:grid; grid-template-columns: minmax(0,1fr) 300px; gap:18px; }
+  @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; }
+  .stage { position:relative; background:#000; border-radius:10px; overflow:hidden; aspect-ratio:4/3; }
+  video { width:100%; height:100%; object-fit:contain; transform:scaleX(-1); display:block; }
+  .flash { position:absolute; inset:0; background:#fff; opacity:0; pointer-events:none; transition:opacity .25s; }
+  .flash.on { opacity:.75; transition:none; }
+  .countdown { position:absolute; inset:0; display:grid; place-items:center; font-size:96px;
+               font-weight:700; color:#fff; text-shadow:0 2px 12px #000a; pointer-events:none; }
+  .msg { position:absolute; inset:0; display:grid; place-items:center; color:#fff; padding:20px; text-align:center; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:12px; }
+  button { font:inherit; border:0; border-radius:10px; padding:12px 18px; cursor:pointer; color:#fff; font-weight:600; }
+  button.rock { background:var(--rock); } button.paper { background:var(--paper); } button.scissors { background:var(--scissors); }
+  button.ghost { background:transparent; color:var(--ink); border:1px solid var(--line); font-weight:500; }
+  button:disabled { opacity:.5; cursor:default; }
+  kbd { font:12px ui-monospace, monospace; background:#0002; border-radius:4px; padding:1px 5px; margin-left:6px; }
+  button.ghost kbd { background:#0000000d; }
+  select { font:inherit; padding:8px; border-radius:8px; border:1px solid var(--line); background:#fff; max-width:100%; }
+  .bar { margin:10px 0 0; }
+  .bar .lbl { display:flex; justify-content:space-between; font-variant-numeric:tabular-nums; }
+  .track { height:8px; background:#eceae5; border-radius:99px; overflow:hidden; margin-top:4px; }
+  .fill { height:100%; border-radius:99px; transition:width .3s; }
+  h2 { font-size:15px; margin:0 0 6px; }
+  ul { margin:6px 0 0; padding-left:18px; color:var(--muted); font-size:13.5px; }
+  .drop { border:2px dashed var(--line); border-radius:10px; padding:18px; text-align:center; color:var(--muted); margin-top:10px; }
+  .drop.over { border-color:var(--paper); color:var(--paper); }
+  .status { color:var(--muted); font-size:13px; min-height:1.4em; margin-top:8px; }
+  .side > .card + .card { margin-top:14px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Taş · Kağıt · Makas — dataset toplama</h1>
+  <p class="sub">Hareketi yap, ilgili butona bas (ya da 1 / 2 / 3). Fotoğraf doğrudan <code>dataset/&lt;sınıf&gt;/</code> klasörüne kaydedilir.</p>
+
+  <div class="grid">
+    <section class="card">
+      <div class="stage">
+        <video id="video" autoplay playsinline muted></video>
+        <div class="flash" id="flash"></div>
+        <div class="countdown" id="countdown"></div>
+        <div class="msg" id="camMsg">Kamera açılıyor…</div>
+      </div>
+      <div class="row">
+        <button class="rock" data-label="rock">Taş<kbd>1</kbd></button>
+        <button class="paper" data-label="paper">Kağıt<kbd>2</kbd></button>
+        <button class="scissors" data-label="scissors">Makas<kbd>3</kbd></button>
+        <button class="ghost" id="undo">Geri al<kbd>Z</kbd></button>
+      </div>
+      <div class="row">
+        <label>Zamanlayıcı
+          <select id="timer">
+            <option value="0">Yok</option>
+            <option value="2">2 sn</option>
+            <option value="3" selected>3 sn</option>
+          </select>
+        </label>
+        <label>Kamera <select id="camSel"></select></label>
+      </div>
+      <div class="status" id="status"></div>
+    </section>
+
+    <aside class="side">
+      <div class="card">
+        <h2>İlerleme (hedef: her sınıf ≥ 150)</h2>
+        <div id="bars"></div>
+      </div>
+      <div class="card">
+        <h2>Telefon fotoğrafları</h2>
+        <label>Sınıf
+          <select id="upLabel">
+            <option value="rock">Taş</option>
+            <option value="paper">Kağıt</option>
+            <option value="scissors">Makas</option>
+          </select>
+        </label>
+        <div class="drop" id="drop">Fotoğrafları buraya sürükle<br>ya da <a href="#" id="pick">dosya seç</a></div>
+        <input type="file" id="file" accept="image/*" multiple hidden>
+      </div>
+      <div class="card">
+        <h2>Her sınıf için çeşitlilik</h2>
+        <ul>
+          <li>3 arka plan: düz duvar, masa üstü, karışık oda (~50'şer)</li>
+          <li>Açı: önden, sağa/sola eğik, yukarıdan, aşağıdan, avuç içi, el üstü</li>
+          <li>Mesafe: yakın, orta, uzak</li>
+          <li>Sağ ve sol el</li>
+          <li>Yarısı telefon, yarısı laptop</li>
+          <li>Tek el, parmaklar kadrajda, net hareket, bulanık değil</li>
+        </ul>
+      </div>
+    </aside>
+  </div>
+</main>
+
+<script>
+if (!location.pathname.endsWith("/")) location.replace(location.pathname + "/" + location.search);
+const NAMES = { rock: "Taş", paper: "Kağıt", scissors: "Makas" };
+const COLORS = { rock: "var(--rock)", paper: "var(--paper)", scissors: "var(--scissors)" };
+const TARGET = 150;
+const $ = (id) => document.getElementById(id);
+const video = $("video");
+let stream = null, busy = false;
+
+function renderCounts(c) {
+  $("bars").innerHTML = Object.keys(NAMES).map((k) => {
+    const n = c[k] ?? 0, pct = Math.min(100, (n / TARGET) * 100);
+    return `<div class="bar"><div class="lbl"><span>${NAMES[k]}</span><span>${n} / ${TARGET}</span></div>
+      <div class="track"><div class="fill" style="width:${pct}%;background:${COLORS[k]}"></div></div></div>`;
+  }).join("");
+}
+
+async function startCamera(deviceId) {
+  if (stream) stream.getTracks().forEach((t) => t.stop());
+  $("camMsg").hidden = false;
+  $("camMsg").textContent = "Kamera açılıyor…";
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 1280 }, height: { ideal: 960 }, ...(deviceId ? { deviceId: { exact: deviceId } } : {}) },
+      audio: false,
+    });
+    video.srcObject = stream;
+    $("camMsg").hidden = true;
+    const devs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "videoinput");
+    const cur = stream.getVideoTracks()[0].getSettings().deviceId;
+    $("camSel").innerHTML = devs.map((d, i) =>
+      `<option value="${d.deviceId}" ${d.deviceId === cur ? "selected" : ""}>${d.label || "Kamera " + (i + 1)}</option>`).join("");
+  } catch (e) {
+    $("camMsg").textContent = "Kameraya erişilemedi. Lütfen izin ver.";
+  }
+}
+
+async function post(url, body) {
+  const r = await fetch(url, { method: "POST", body });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error || r.status);
+  renderCounts(j);
+  return j;
+}
+
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function capture(label) {
+  if (busy || !stream) return;
+  busy = true;
+  document.querySelectorAll("button[data-label]").forEach((b) => (b.disabled = true));
+  try {
+    for (let s = +$("timer").value; s > 0; s--) { $("countdown").textContent = s; await wait(1000); }
+    $("countdown").textContent = "";
+    const c = document.createElement("canvas");
+    c.width = video.videoWidth; c.height = video.videoHeight;
+    c.getContext("2d").drawImage(video, 0, 0);
+    const blob = await new Promise((r) => c.toBlob(r, "image/jpeg", 0.92));
+    $("flash").classList.add("on"); requestAnimationFrame(() => requestAnimationFrame(() => $("flash").classList.remove("on")));
+    await post(`save?label=${label}&source=laptop&ext=.jpg`, blob);
+    $("status").textContent = `${NAMES[label]} kaydedildi. Bir sonraki için açıyı / mesafeyi biraz değiştir.`;
+  } catch (e) {
+    $("status").textContent = "Kaydedilemedi: " + e.message;
+  } finally {
+    busy = false;
+    document.querySelectorAll("button[data-label]").forEach((b) => (b.disabled = false));
+  }
+}
+
+async function upload(files) {
+  const label = $("upLabel").value;
+  let ok = 0;
+  for (const f of files) {
+    const ext = (f.name.match(/\.[^.]+$/)?.[0] || ".jpg").toLowerCase();
+    try { await post(`save?label=${label}&source=phone&ext=${ext}`, f); ok++; }
+    catch (e) { $("status").textContent = `${f.name}: ${e.message}`; }
+    $("status").textContent = `${NAMES[label]}: ${ok} / ${files.length} yüklendi`;
+  }
+}
+
+document.querySelectorAll("button[data-label]").forEach((b) => b.addEventListener("click", () => capture(b.dataset.label)));
+$("undo").addEventListener("click", async () => { await post("undo"); $("status").textContent = "Son fotoğraf silindi."; });
+$("camSel").addEventListener("change", (e) => startCamera(e.target.value));
+document.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "SELECT") return;
+  const k = { "1": "rock", "2": "paper", "3": "scissors" }[e.key];
+  if (k) capture(k);
+  if (e.key.toLowerCase() === "z") $("undo").click();
+});
+
+const drop = $("drop");
+$("pick").addEventListener("click", (e) => { e.preventDefault(); $("file").click(); });
+$("file").addEventListener("change", (e) => upload([...e.target.files]));
+drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+drop.addEventListener("drop", (e) => { e.preventDefault(); drop.classList.remove("over"); upload([...e.dataTransfer.files]); });
+
+fetch("counts").then((r) => r.json()).then(renderCounts);
+startCamera();
+</script>
+</body>
+</html>

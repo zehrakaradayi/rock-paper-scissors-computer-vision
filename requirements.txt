@@ -1,0 +1,14 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+torchvision
+timm
+mediapipe
+opencv-contrib-python-headless
+onnx
+onnxruntime
+onnxscript
+scikit-learn
+matplotlib
+pillow
+pandas
+ipykernel
