@@ -1,0 +1,434 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Canlı eğitim</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #f6f7fb; overflow: hidden; }
+  canvas { display: block; margin: auto; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Canlı eğitim paneli. live.py birkaç saniyede bir /state'e modelin O ANKİ değerlerini koyar: eğitilen batch'in
+// fotoğrafları, seçilen fotoğraf, her bloğun takip edilen damgasının (kanalının) çıktıları (küçük bir ızgaraya
+// ortalanmış), damganın ağırlıkları ve tahmin. Sayfa bunları "şehir" olarak canlandırır: kule yüksekliği = o
+// bölgenin damgaya ne kadar benzediği.
+// Model A (kind "A"): Conv, BatchNorm gerçek; ReLU ve MaxPool ızgara üstünde burada uygulanır (yaklaşık).
+// Model B (kind "B"): her aşamanın ilk bloğu; Patchify, Conv 7x7, LayerNorm, Residual gerçek; GELU burada
+// LayerNorm çıktısına uygulanır (gerçekte araya 1x1 karıştırma girer), Downsample sonucu gerçek.
+const W = 1200, H = 720;
+const INK = "#1d2433", MUTED = "#b8c0cc", ACCENT = "#ff9f43", GOOD = "#22a06b", BAD = "#e5484d";
+const TOWER = { top: "#8fb3ff", left: "#5d87e6", right: "#486fcc" };
+const HOT = { top: "#ffc078", left: "#f0973a", right: "#d97f25" };
+const STEPS = ["Conv", "BatchNorm", "ReLU", "MaxPool"];
+const SLOW = [4.0, 1.5, 1.5, 1.5], FAST = [0.35, 0.2, 0.2, 0.25], PICK = 1.0, GUESS = 2.5;
+const PHOTO = { x: 60, y: 230, s: 260 }, CX = 620, CY = 400, F0 = 380;
+const STRIP = { y: 78, s: 40, gap: 6, speed: 22 };
+// Model B
+const B_STEPS = ["Patchify", "Conv 7×7", "LayerNorm", "GELU", "Residual", "Downsample"];
+const B_SLOW = [3.0, 1.3, 1.3, 1.5, 1.2], B_FAST = [0.35, 0.2, 0.2, 0.3, 0.3], PATCH = 1.5;
+const GREY = { top: "#c4cad4", left: "#a2aab8", right: "#8c95a5" };          // donuk (öğrenmeyen) kısım
+const OLD = { top: "#dbe6ff", left: "#c2d3fa", right: "#b0c4f2" };           // Residual: altta geri gelen eski şehir
+const GREY_OLD = { top: "#e3e7ec", left: "#ccd2da", right: "#bcc3cd" };
+const LEARN = "#5d87e6", STUB = 0.015;
+const FB = (s) => F0 * 0.65 ** s; // B'de şehir daha yavaş küçülür: son aşama (öğrenen kısım) görünsün
+const gelu = (x) => 0.5 * x * (1 + Math.tanh(0.7978845608 * (x + 0.044715 * x * x * x)));
+
+const cv = document.getElementById("c"), ctx = cv.getContext("2d");
+let scale = 1;
+function fit() {
+  scale = Math.min(innerWidth / W, innerHeight / H);
+  const d = devicePixelRatio || 1;
+  cv.style.width = W * scale + "px"; cv.style.height = H * scale + "px";
+  cv.width = W * scale * d; cv.height = H * scale * d;
+}
+addEventListener("resize", fit); fit();
+
+const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
+const ease = (t) => t * t * (3 - 2 * t);
+const lerp = (a, b, t) => a + (b - a) * t;
+
+// ---------- veri ----------
+let latest = null, epoch = { e: 0, n: 0 };
+function prep(s) {
+  s._thumbs = s.thumbs.map((src) => Object.assign(new Image(), { src }));
+  s._photo = Object.assign(new Image(), { src: s.photo });
+  s.city = s.kind === "B" ? s.stages.map(stageB) : s.blocks.map(({ conv, bn }) => city(conv, bn));
+  return s;
+}
+function scaler(...Gs) {
+  const f = Gs.flatMap((G) => G.flat()), lo = Math.min(...f), d = Math.max(...f) - lo || 1;
+  return { lo, d, h: (G) => G.map((r) => r.map((v) => (v - lo) / d)) };
+}
+// Model B aşaması: Conv ve LayerNorm aynı ölçekte (su = LayerNorm'un 0'ı), GELU sonrası (su çekilince; suyun altı
+// tamamen silinmez, ezilip kısacık kalır), Residual için blok girişi (eski şehir) ve çıkışı aynı ölçekte.
+function stageB({ inp, conv, ln, out }) {
+  const a = scaler(conv, ln), b = scaler(inp, out), w = clamp(-a.lo / a.d);
+  const r = ln.map((row) => row.map((v) => Math.max((gelu(v) - a.lo) / a.d - w, STUB)));
+  return { g: conv.length, hc: a.h(conv), hl: a.h(ln), w, r, old: b.h(inp), fin: b.h(out) };
+}
+// Bir bloğun şehri: Conv yükseklikleri, BatchNorm yükseklikleri + su seviyesi (BatchNorm çıktısının 0'ı),
+// ReLU sonrası (suyun üstünde kalan kısım), MaxPool sonrası (2x2'nin en uzunu).
+// Conv ve BatchNorm aynı ölçekte: BatchNorm şehri gerçekten kaydırıp esnetiyor görünsün.
+function city(conv, bn) {
+  const g = conv.length, f = [...conv.flat(), ...bn.flat()], lo = Math.min(...f), d = Math.max(...f) - lo;
+  const h = (G) => G.map((r) => r.map((v) => (v - lo) / d));
+  let hc, hb, w;
+  if (g > 1 && d > 0) { hc = h(conv); hb = h(bn); w = clamp(-lo / d); }
+  else { hc = [[0.8]]; hb = [[0.8]]; w = bn[0][0] > 0 ? 0.4 : 1.0; } // tek kule: işaret belirler
+  const r = hb.map((row) => row.map((v) => Math.max(v - w, 0)));
+  const gp = Math.max(1, g >> 1);
+  const pool = [], win = [];
+  for (let i = 0; i < gp; i++) {
+    pool.push([]); win.push([]);
+    for (let j = 0; j < gp; j++) {
+      let best = -1, bi = 0, bj = 0;
+      for (let a = 0; a < (g > 1 ? 2 : 1); a++) for (let e = 0; e < (g > 1 ? 2 : 1); e++) {
+        const v = r[i * (g > 1 ? 2 : 1) + a][j * (g > 1 ? 2 : 1) + e];
+        if (v > best) { best = v; bi = a; bj = e; }
+      }
+      pool[i].push(best); win[i].push([bi, bj]);
+    }
+  }
+  return { g, gp, hc, hb, w, r, pool, win };
+}
+async function poll() {
+  try {
+    const s = await (await fetch("state?since=" + (latest ? latest.id : -1), { cache: "no-store" })).json();
+    epoch = { e: s.epoch, n: s.epochs };
+    if ((s.blocks || s.stages) && (!latest || s.id !== latest.id)) latest = prep(s);
+  } catch (e) { /* eğitim bitti / sunucu kapandı: son hali kalsın */ }
+  setTimeout(poll, 1000);
+}
+poll();
+
+// ---------- zaman çizelgesi: seç → blok 1 yavaş → blok 2-5 hızlı → tahmin ----------
+function timeline(S) {
+  const n = S.city.length;
+  if (S.kind === "B") { // Patchify → her aşamadan bir blok (aşama 1 yavaş) + aşamalar arasında Downsample → tahmin
+    const ph = [{ k: "pick", d: PICK }, { k: "patch", d: PATCH }];
+    for (let s = 0; s < n; s++) for (let st = 0; st < (s < n - 1 ? 5 : 4); st++) ph.push({ k: "b", s, st, d: (s ? B_FAST : B_SLOW)[st] });
+    ph.push({ k: "guess", d: GUESS });
+    return ph;
+  }
+  const ph = [{ k: "pick", d: PICK }];
+  for (let b = 0; b < n; b++) for (let s = 0; s < 4; s++) ph.push({ k: "step", b, s, d: (b ? FAST : SLOW)[s] });
+  ph.push({ k: "guess", d: GUESS });
+  return ph;
+}
+let pass = null;
+function phaseAt(t) {
+  for (const p of pass.ph) { if (t < p.d) return [p, t / p.d]; t -= p.d; }
+  return null;
+}
+
+// ---------- çizim yardımcıları ----------
+function poly(pts, fill, alpha = 1) {
+  ctx.globalAlpha = alpha; ctx.fillStyle = fill; ctx.beginPath();
+  pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+  ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1;
+}
+function iso(u, v, h, F, g) {
+  const c = F / g / 2;
+  return [CX + (u - v) * c, CY + (u + v - g) * c / 2 - h];
+}
+function tower(u0, u1, v0, v1, h0, h1, F, g, col, alpha = 1) {
+  if (h1 - h0 < 0.3) return;
+  const P = (u, v, h) => iso(u, v, h, F, g);
+  poly([P(u1, v0, h0), P(u1, v1, h0), P(u1, v1, h1), P(u1, v0, h1)], col.right, alpha);
+  poly([P(u0, v1, h0), P(u1, v1, h0), P(u1, v1, h1), P(u0, v1, h1)], col.left, alpha);
+  poly([P(u0, v0, h1), P(u1, v0, h1), P(u1, v1, h1), P(u0, v1, h1)], col.top, alpha);
+}
+function ground(F, g) {
+  const P = (u, v) => iso(u, v, 0, F, g);
+  poly([P(0, 0), P(g, 0), P(g, g), P(0, g)], "#e6eaf1");
+  ctx.strokeStyle = "#d3d9e3"; ctx.lineWidth = 1; ctx.beginPath();
+  [P(0, 0), P(g, 0), P(g, g), P(0, g), P(0, 0)].forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+  ctx.stroke();
+}
+function water(F, g, h) {
+  if (h < 0.5) return;
+  const P = (u, v) => iso(u, v, h, F, g);
+  poly([P(0, 0), P(g, 0), P(g, g), P(0, g)], "rgba(70,170,255,0.32)");
+  ctx.strokeStyle = "rgba(40,140,230,0.7)"; ctx.lineWidth = 1.5; ctx.beginPath();
+  [P(0, 0), P(g, 0), P(g, g), P(0, g), P(0, 0)].forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+  ctx.stroke();
+}
+// kuleler: [{i, j, h (0..1), col, alpha, span (MaxPool'da büyüyen kule), base + baseCol (Residual'da alttaki eski kısım)}];
+// su varsa önce suyun altı, sonra su, sonra üstü
+function drawCity(cells, F, g, waterH) {
+  const HM = 0.5 * F, E = 0.08;
+  cells.sort((a, b) => a.i + a.j - (b.i + b.j));
+  const draw = (lo, hi) => cells.forEach((c) => {
+    const sp = c.span || 1, h = c.h * HM, b = Math.min((c.base || 0) * HM, h);
+    const seg = (h0, h1, col) => tower(c.j + E, c.j + sp - E, c.i + E, c.i + sp - E, Math.max(lo, Math.min(hi, h0)), Math.min(hi, h1), F, g, col, c.alpha ?? 1);
+    if (b > 0) seg(0, b, c.baseCol);
+    seg(b, h, c.col || TOWER);
+  });
+  draw(0, waterH);
+  water(F, g, waterH);
+  draw(waterH, 1e9);
+}
+const zeros = (g) => Array.from({ length: g }, () => Array(g).fill(0));
+
+// ---------- adımlar ----------
+function renderStep(S, b, s, p) {
+  const C = S.city[b], g = C.g, F = F0 / 2 ** b;
+  const prev = b ? S.city[b - 1].pool : zeros(g);
+  const cells = [];
+  let F2 = F, g2 = g, waterH = 0, hot = null, outline = 0;
+  if (s === 0) { // Conv: damga geçtikçe kule yükselir
+    const n = g * g, k = Math.min(n - 1, Math.floor(p * n));
+    for (let i = 0; i < g; i++) for (let j = 0; j < g; j++) {
+      const r = ease(clamp(p * n - (i * g + j)));
+      cells.push({ i, j, h: lerp(prev[i][j], C.hc[i][j], r), col: i * g + j === k && p < 1 ? HOT : TOWER });
+    }
+    hot = { i: Math.floor(k / g), j: k % g, h: C.hc[Math.floor(k / g)][k % g] };
+  } else if (s === 1) { // BatchNorm: şehir kayar/esner, su ortalamaya kadar yükselir
+    const q = ease(p);
+    for (let i = 0; i < g; i++) for (let j = 0; j < g; j++) cells.push({ i, j, h: lerp(C.hc[i][j], C.hb[i][j], q) });
+    waterH = C.w * q * 0.5 * F;
+  } else if (s === 2) { // ReLU: suyun altı silinir, su çekilir
+    const fade = ease(clamp(p / 0.5)), drain = ease(clamp((p - 0.5) / 0.5));
+    for (let i = 0; i < g; i++) for (let j = 0; j < g; j++) {
+      const v = C.hb[i][j];
+      if (v <= C.w) { if (fade < 1) cells.push({ i, j, h: v, alpha: 1 - fade }); }
+      else cells.push({ i, j, h: v - C.w * drain });
+    }
+    waterH = C.w * (1 - drain) * 0.5 * F;
+  } else { // MaxPool: her 2x2'nin en uzunu kalır, şehir küçülür
+    const k = g > 1 ? 2 : 1;
+    if (p < 0.3 || g === 1) {
+      for (let i = 0; i < g; i++) for (let j = 0; j < g; j++) cells.push({ i, j, h: C.r[i][j] });
+      if (g > 1) outline = ease(clamp(p / 0.3));
+      if (g === 1) { F2 = lerp(F, F / 2, ease(p)); cells.length = 0; cells.push({ i: 0, j: 0, h: C.pool[0][0] }); }
+    } else if (p < 0.7) {
+      const q = ease((p - 0.3) / 0.4);
+      for (let gi = 0; gi < C.gp; gi++) for (let gj = 0; gj < C.gp; gj++) {
+        const [wi, wj] = C.win[gi][gj];
+        for (let a = 0; a < k; a++) for (let e = 0; e < k; e++) if (a !== wi || e !== wj)
+          cells.push({ i: gi * k + a, j: gj * k + e, h: C.r[gi * k + a][gj * k + e] * (1 - q) });
+        // kazanan kule: kendi karesinden 2x2'nin tamamına büyür
+        const i0 = lerp(gi * k + wi, gi * k, q), j0 = lerp(gj * k + wj, gj * k, q);
+        cells.push({ i: i0, j: j0, h: C.pool[gi][gj], span: lerp(1, k, q), col: HOT });
+      }
+      outline = 1;
+    } else {
+      F2 = lerp(F, F / 2, ease((p - 0.7) / 0.3)); g2 = C.gp;
+      for (let i = 0; i < g2; i++) for (let j = 0; j < g2; j++) cells.push({ i, j, h: C.pool[i][j] });
+    }
+  }
+  ground(F2, g2);
+  drawCity(cells, F2, g2, waterH);
+  if (outline) groups(F, g, outline);
+  return hot;
+}
+function renderPatch(S, p) { // Patchify: fotoğraf karelere bölünür, her kare bir kule olur (hepsi birden)
+  const C = S.city[0], g = C.g, q = ease(clamp((p - 0.3) / 0.7)), cells = [];
+  for (let i = 0; i < g; i++) for (let j = 0; j < g; j++) cells.push({ i, j, h: C.old[i][j] * q, col: S.frozen[0] ? GREY : TOWER });
+  ground(FB(0), g); drawCity(cells, FB(0), g, 0);
+  photoGrid(g, 0.8 * ease(clamp(p / 0.3)));
+}
+function renderB(S, s, st, p) {
+  const C = S.city[s], g = C.g, F = FB(s), HM = 0.5 * F, cells = [];
+  const col = S.frozen[s] ? GREY : TOWER, oldCol = S.frozen[s] ? GREY_OLD : OLD;
+  const each = (fn) => { for (let i = 0; i < g; i++) for (let j = 0; j < g; j++) cells.push(fn(i, j)); };
+  let F2 = F, g2 = g, waterH = 0, hot = null, outline = 0;
+  if (st === 0) { // Conv 7x7: damga geçtikçe kule eski yüksekliğinden yenisine geçer
+    const n = g * g, k = Math.min(n - 1, Math.floor(p * n));
+    each((i, j) => ({ i, j, h: lerp(C.old[i][j], C.hc[i][j], ease(clamp(p * n - (i * g + j)))), col: i * g + j === k && p < 1 ? HOT : col }));
+    hot = { i: Math.floor(k / g), j: k % g, h: C.hc[Math.floor(k / g)][k % g] };
+  } else if (st === 1) { // LayerNorm: şehir kayar/esner, su ortalamaya kadar yükselir
+    const q = ease(p);
+    each((i, j) => ({ i, j, h: lerp(C.hc[i][j], C.hl[i][j], q), col }));
+    waterH = C.w * q * HM;
+  } else if (st === 2) { // GELU: su çekilir, suyun altı ezilip kısacık kalır
+    const q = ease(p);
+    each((i, j) => ({ i, j, h: lerp(C.hl[i][j], C.r[i][j], q), col }));
+    waterH = C.w * (1 - q) * HM;
+  } else if (st === 3) { // Residual: eski şehir altta geri gelir, yeni kısım üstüne eklenir
+    each((i, j) => {
+      const o = C.old[i][j], f = C.fin[i][j], add = Math.max(f - o, 0);
+      if (p < 0.5) { const q = ease(p / 0.5); return { i, j, base: o * q, h: o * q + lerp(C.r[i][j], add, q), col, baseCol: oldCol }; }
+      const tot = lerp(o + add, f, ease((p - 0.5) / 0.5));
+      return { i, j, base: Math.min(o, tot), h: tot, col, baseCol: oldCol };
+    });
+  } else { // Downsample: her 2x2 karışıp tek kule olur, şehir küçülür
+    const N = S.city[s + 1];
+    if (p < 0.7) {
+      const q = ease(clamp((p - 0.3) / 0.4));
+      each((i, j) => ({ i, j, h: lerp(C.fin[i][j], N.old[i >> 1][j >> 1], q), col }));
+      outline = ease(clamp(p / 0.3));
+    } else {
+      F2 = lerp(F, FB(s + 1), ease((p - 0.7) / 0.3)); g2 = N.g;
+      for (let i = 0; i < g2; i++) for (let j = 0; j < g2; j++) cells.push({ i, j, h: N.old[i][j], col: S.frozen[s + 1] ? GREY : TOWER });
+    }
+  }
+  ground(F2, g2);
+  drawCity(cells, F2, g2, waterH);
+  if (outline) groups(F, g, outline);
+  return hot;
+}
+function guessB(S, p) { // son şehrin ortalaması tek kule olur → karar kısmı (öğreniyorsa mavi)
+  const C = S.city[S.city.length - 1], g = C.g, F = FB(S.city.length - 1);
+  const avg = C.fin.flat().reduce((a, b) => a + b) / (g * g), q = ease(clamp(p / 0.35));
+  ground(F, g);
+  if (p < 0.35) {
+    const cells = [];
+    for (let i = 0; i < g; i++) for (let j = 0; j < g; j++) cells.push({ i, j, h: lerp(C.fin[i][j], avg, q), col: S.frozen.at(-1) ? GREY : TOWER });
+    drawCity(cells, F, g, 0);
+  } else drawCity([{ i: 0, j: 0, h: avg, span: g, col: S.head_frozen ? GREY : TOWER }], F, g, 0);
+  const pred = S.probs.indexOf(Math.max(...S.probs));
+  if (p > 0.3 && p < 0.75) link(iso(g / 2, g / 2, avg * 0.5 * F, F, g), [920, 290 + 64 * S.order.indexOf(pred)]);
+  drawGuess(S, ease(clamp((p - 0.35) / 0.45)));
+}
+function photoGrid(g, a) { // Patchify kareleri fotoğrafın üstünde
+  if (a <= 0) return;
+  ctx.globalAlpha = a; ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1; ctx.beginPath();
+  for (let k = 1; k < g; k++) {
+    const o = (k * PHOTO.s) / g;
+    ctx.moveTo(PHOTO.x + o, PHOTO.y); ctx.lineTo(PHOTO.x + o, PHOTO.y + PHOTO.s);
+    ctx.moveTo(PHOTO.x, PHOTO.y + o); ctx.lineTo(PHOTO.x + PHOTO.s, PHOTO.y + o);
+  }
+  ctx.stroke(); ctx.globalAlpha = 1;
+}
+function groups(F, g, a) { // MaxPool / Downsample grupları: 2x2 çerçeveler
+  ctx.globalAlpha = a; ctx.strokeStyle = ACCENT; ctx.lineWidth = 2;
+  for (let i = 0; i < g; i += 2) for (let j = 0; j < g; j += 2) {
+    const P = (u, v) => iso(u, v, 0, F, g);
+    ctx.beginPath();
+    [P(j + 0.05, i + 0.05), P(j + 1.95, i + 0.05), P(j + 1.95, i + 1.95), P(j + 0.05, i + 1.95)].forEach(([x, y], n) => (n ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+    ctx.closePath(); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ---------- fotoğraf, damga, şerit, tahmin ----------
+function stripX(k, now, n) {
+  const step = STRIP.s + STRIP.gap, len = n * step;
+  return ((k * step - now * STRIP.speed) % len + len) % len - step + 20;
+}
+function drawStrip(S, now) {
+  S._thumbs.forEach((im, k) => {
+    const x = stripX(k, now, S._thumbs.length);
+    if (x < -STRIP.s || x > W) return;
+    ctx.drawImage(im, x, STRIP.y, STRIP.s, STRIP.s);
+    if (k === S.pick) { ctx.strokeStyle = ACCENT; ctx.lineWidth = 3; ctx.strokeRect(x - 1.5, STRIP.y - 1.5, STRIP.s + 3, STRIP.s + 3); }
+  });
+}
+function drawPhoto(S, a = 1) {
+  ctx.globalAlpha = a;
+  ctx.drawImage(S._photo, PHOTO.x, PHOTO.y, PHOTO.s, PHOTO.s);
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = "#d3d9e3"; ctx.lineWidth = 1; ctx.strokeRect(PHOTO.x, PHOTO.y, PHOTO.s, PHOTO.s);
+}
+function drawStamp(S, hot, g, mult) { // damga: gerçek ağırlıklar (A 3x3, B 7x7; koyu = artı, açık = eksi)
+  const cs = PHOTO.s / g, sz = cs * mult, n = S.stamp.length;
+  const x = PHOTO.x + (hot.j + 0.5) * cs - sz / 2, y = PHOTO.y + (hot.i + 0.5) * cs - sz / 2;
+  S.stamp.forEach((row, a) => row.forEach((v, e) => {
+    ctx.fillStyle = v >= 0 ? `rgba(29,50,120,${0.25 + 0.65 * v})` : `rgba(255,255,255,${0.25 + 0.65 * -v})`;
+    ctx.fillRect(x + e * sz / n, y + a * sz / n, sz / n, sz / n);
+  }));
+  ctx.strokeStyle = ACCENT; ctx.lineWidth = 3; ctx.strokeRect(x, y, sz, sz);
+  return [x + sz, y + sz / 2];
+}
+function link([x0, y0], [x1, y1]) {
+  ctx.strokeStyle = ACCENT; ctx.lineWidth = 1.5; ctx.setLineDash([5, 5]);
+  ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke(); ctx.setLineDash([]);
+}
+function drawGuess(S, fill) {
+  const pred = S.probs.indexOf(Math.max(...S.probs));
+  S.order.forEach((k, row) => {
+    const y = 290 + row * 64;
+    ctx.fillStyle = INK; ctx.font = "600 22px system-ui, sans-serif"; ctx.textBaseline = "middle";
+    ctx.fillText(S.names[k], 930, y);
+    ctx.fillStyle = "#e9edf3"; round(1030, y - 12, 140, 24, 8);
+    const col = k === S.label ? GOOD : k === pred ? BAD : "#9fb3d1";
+    ctx.fillStyle = col; if (fill > 0) round(1030, y - 12, Math.max(8, 140 * S.probs[k] * fill), 24, 8);
+  });
+}
+function round(x, y, w, h, r) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); ctx.fill(); }
+function drawNames(names, s, gap) {
+  ctx.font = "600 18px system-ui, sans-serif"; ctx.textBaseline = "middle"; ctx.textAlign = "center";
+  names.forEach((name, k) => { ctx.fillStyle = k === s ? INK : MUTED; ctx.fillText(name, CX + (k - (names.length - 1) / 2) * gap, 650); });
+  ctx.textAlign = "left";
+}
+// B: aşama başına blok sayısı kadar nokta (3, 3, 9, 3) + karar kısmı; gri = donuk, mavi = öğreniyor; şu anki aşama büyük
+function drawDotsB(S, active) {
+  const grp = [...S.counts, 1], gap = 13, sep = 26;
+  let x = CX - (grp.reduce((a, n) => a + (n - 1) * gap, 0) + (grp.length - 1) * sep) / 2;
+  grp.forEach((n, k) => {
+    ctx.fillStyle = (k < S.counts.length ? S.frozen[k] : S.head_frozen) ? MUTED : LEARN;
+    for (let i = 0; i < n; i++) { ctx.beginPath(); ctx.arc(x, 684, k === active ? 5.5 : 3.5, 0, 7); ctx.fill(); x += gap; }
+    x += sep - gap;
+  });
+}
+function drawSteps(b, s, n) {
+  drawNames(STEPS, s, 110);
+  for (let k = 0; k < n; k++) {
+    ctx.fillStyle = k === b ? INK : k < b ? "#8a93a3" : MUTED;
+    ctx.beginPath(); ctx.arc(CX + (k - (n - 1) / 2) * 22, 684, k === b ? 6 : 4, 0, 7); ctx.fill();
+  }
+}
+
+// ---------- ana döngü ----------
+function frame(ms) {
+  const now = ms / 1000, d = devicePixelRatio || 1;
+  ctx.setTransform(scale * d, 0, 0, scale * d, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = INK; ctx.font = "600 20px system-ui, sans-serif"; ctx.textBaseline = "middle";
+  if (latest) ctx.fillText(latest.title || "Model A öğreniyor", 40, 36);
+  if (epoch.n) { ctx.textAlign = "center"; ctx.font = "600 20px system-ui, sans-serif"; ctx.fillText(`Epoch ${epoch.e} / ${epoch.n}`, W / 2, 36); ctx.textAlign = "left"; }
+  if (!pass && latest) pass = { s: latest, t0: now, ph: timeline(latest) };
+  if (pass) {
+    let cur = phaseAt(now - pass.t0);
+    if (!cur) { pass = { s: latest, t0: now, ph: timeline(latest) }; cur = phaseAt(0); } // sıradaki fotoğraf, en yeni değerlerle
+    const S = pass.s, [ph, p] = cur;
+    drawStrip(S, now);
+    if (ph.k === "pick") { // seçilen fotoğraf şeritten çıkıp büyür
+      const q = ease(p), x0 = stripX(S.pick, pass.t0, S._thumbs.length);
+      ctx.drawImage(S._photo, lerp(x0, PHOTO.x, q), lerp(STRIP.y, PHOTO.y, q), lerp(STRIP.s, PHOTO.s, q), lerp(STRIP.s, PHOTO.s, q));
+      ground(F0, S.city[0].g);
+      drawGuess(S, 0);
+    } else if (ph.k === "patch") {
+      drawPhoto(S); renderPatch(S, p); drawNames(B_STEPS, 0, 125); drawDotsB(S, -1); drawGuess(S, 0);
+    } else if (ph.k === "b") {
+      drawPhoto(S, ph.s === 0 ? 1 : 0.55);
+      if (ph.s === 0) photoGrid(S.city[0].g, 0.35);
+      const hot = renderB(S, ph.s, ph.st, p);
+      if (hot && ph.s === 0) {
+        const g = S.city[0].g, from = drawStamp(S, hot, g, 2.6);
+        link(from, iso(hot.j + 0.5, hot.i + 0.5, hot.h * 0.5 * FB(0), FB(0), g));
+      }
+      drawNames(B_STEPS, ph.st + 1, 125); drawDotsB(S, ph.s); drawGuess(S, 0);
+    } else if (ph.k === "guess" && S.kind === "B") {
+      drawPhoto(S, 0.55); guessB(S, p); drawNames(B_STEPS, -1, 125); drawDotsB(S, S.counts.length);
+    } else if (ph.k === "step") {
+      drawPhoto(S, ph.b === 0 ? 1 : 0.55);
+      const hot = renderStep(S, ph.b, ph.s, p);
+      if (hot && ph.b === 0) {
+        const g = S.city[0].g, from = drawStamp(S, hot, g, 1.3);
+        const [tx, ty] = iso(hot.j + 0.5, hot.i + 0.5, hot.h * 0.5 * F0, F0, g);
+        link(from, [tx, ty]);
+      }
+      drawSteps(ph.b, ph.s, S.city.length);
+      drawGuess(S, 0);
+    } else { // tahmin
+      drawPhoto(S, 0.55);
+      const last = S.city.length - 1, F = F0 / 2 ** (last + 1), g = S.city[last].gp;
+      ground(F, g); drawCity([{ i: 0, j: 0, h: S.city[last].pool[0][0] }], F, g, 0);
+      const q = ease(clamp((p - 0.15) / 0.5));
+      const pred = S.probs.indexOf(Math.max(...S.probs));
+      if (p < 0.6) link([CX + 10, CY], [920, 290 + 64 * S.order.indexOf(pred)]);
+      drawGuess(S, q);
+    }
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
