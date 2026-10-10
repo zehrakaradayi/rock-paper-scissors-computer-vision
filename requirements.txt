@@ -12,3 +12,4 @@ matplotlib
 pillow
 pandas
 ipykernel
+pillow-heif

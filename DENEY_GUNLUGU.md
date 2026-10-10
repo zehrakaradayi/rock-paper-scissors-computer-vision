@@ -17,7 +17,23 @@
 
 ## Aşama 2 — Data Cleaning
 
-_(yapılacak)_
+- Script: `tools/prepare_data.py`, kırpma kuralı: `rps_crop.py` (deneme sayfası da aynı kuralı kullanacak)
+- El bulma: MediaPipe Hand Landmarker (`models/hand_landmarker.task`), 21 noktanın kutusu → uzun kenar × 1.4 kare → dışarı taşan kısım siyah → 224×224
+- El bulunamayan: 17 fotoğraf (rock 8, paper 2, scissors 7) → `data/no_hand/`, eğitime girmedi.
+  Çoğu çok uzak, bulanık ya da parmakları kadraj dışında kalan çok yakın çekimler.
+- Bölme: %70 / %15 / %15, sınıf + kaynak (laptop/telefon) içinde **5'li ardışık gruplar** halinde
+  (art arda çekilmiş neredeyse aynı kareler train ve test'e bölünmesin diye), seed = 42
+
+  | split | rock | paper | scissors | toplam |
+  |---|---|---|---|---|
+  | train | 94 | 101 | 103 | 298 |
+  | val | 25 | 22 | 20 | 67 |
+  | test | 25 | 25 | 20 | 70 |
+  | toplam | 144 | 148 | 143 | 435 |
+
+- Görsel kontrol: 435 kırpmanın hepsine bakıldı; el ortada ve tam, yanlış sınıfta görsel yok.
+- Teknik not: sunucu ARM (aarch64) ve MediaPipe 1.x'in istediği libEGL/libGLESv2 yüklü değil →
+  `tools/setup_gl_libs.sh` Debian paketlerinden `vendor/gl/` içine indirir.
 
 ## Aşama 3 — Model Seçimi
 
