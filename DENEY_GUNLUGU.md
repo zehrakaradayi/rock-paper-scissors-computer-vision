@@ -117,7 +117,15 @@ Aynı train / val / test bölünmesi, aynı augmentation, aynı normalizasyon (I
 
 ## Aşama 5 — Dene ve Karar Ver
 
-_(yapılacak)_
+- Deneme sayfası: `play.py` + `play.html` (localhost:8001). Model sunucunun CPU'sunda çalışır; el MediaPipe ile bulunur
+  ve eğitimdekiyle aynı kuralla (`rps_crop.py`) kırpılır. İki model yan yana: kutu, tahmin, % confidence, olasılık çubukları.
+- **Seçilen model: Model A (sıfırdan CNN).**
+- Neden: canlı denemede kamerada **Model A daha emin ve daha tutarlıydı**; Model B daha çok karıştırdı / yüzdeleri daha çok oynadı.
+- Metrikler ve canlı deneme aynı şeyi söyledi mi? **Hayır.** Testte B önde (1.000 vs 0.987) ama fark 70 fotoğrafta tek bir
+  hataydı; o kadar küçük bir farkı canlı deneme tersine çevirdi. Test seti train ile aynı seanslardan geldiği için gerçek
+  kamerayı tam temsil etmiyor; karar için canlı deneme daha belirleyici oldu.
+- Akılda tutulacak risk: Grad-CAM'de A'nın makas ve taşta arka plana baktığı görülmüştü; eğitimdekinden çok farklı bir
+  arka planda zorlanabilir.
 
 ## Aşama 6 — Productize ve Deploy
 
