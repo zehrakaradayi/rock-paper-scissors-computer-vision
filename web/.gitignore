@@ -1,0 +1,8 @@
+node_modules/
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
+# build sırasında node_modules'tan kopyalanır (scripts/copy-assets.mjs)
+public/ort/
+public/mediapipe/

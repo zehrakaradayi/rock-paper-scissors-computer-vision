@@ -131,3 +131,18 @@ Aynı train / val / test bölünmesi, aynı augmentation, aynı normalizasyon (I
 
 - **Kaybeden kaldırıldı:** Model B'nin dosyaları (`model_b.onnx`, `model_b.int8.onnx`, `model_b.pt`, `model_b.json`) silindi.
   `training.ipynb`'deki Model B bölümü ve karşılaştırma, eğitimin kaydı olarak çıktılarıyla birlikte duruyor.
+- **Web uygulaması:** `web/` (Next.js 15). Model tarayıcıda çalışır (ONNX Runtime Web, `model_a.int8.onnx`, 27 MB);
+  el MediaPipe Hand Landmarker ile tarayıcıda bulunur ve eğitimdekiyle aynı kuralla kırpılır (kare × 1.4, dışı siyah, 224 px).
+  Sunucu yok, API anahtarı yok; kamera görüntüsü cihazdan çıkmaz.
+- Arayüz: başlık + açıklama, büyük kamera görüntüsü, bounding box + tahmin + % confidence, olasılık çubukları,
+  yükleniyor / hata / "Elini kameraya göster" durumları, model adı + macro F1 bilgi kartı, mobil uyumlu (ön kamera).
+- Headless Chromium + sahte kamera ile test (her sınıftan bir test fotoğrafı):
+
+  | Fotoğraf | Tarayıcı (int8) | Python sunucu (fp32) |
+  |---|---|---|
+  | Taş | Taş %82 | Taş %87 |
+  | Kağıt | Kağıt %89 | Kağıt %89 |
+  | Makas | Makas %97 | Makas %95 |
+
+  Ayrıca: el yokken "Elini kameraya göster", kamera izni reddedilince "Kameraya erişilemedi. Lütfen izin ver.",
+  390 px telefon ekranında yatay taşma yok.
