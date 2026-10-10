@@ -11,3 +11,6 @@ node_modules/
 .vercel/
 .DS_Store
 vendor/
+# Tam hassasiyetli ONNX (>100 MB, GitHub sınırı) sadece sunucuda; repoya int8 sürümü girer
+models/*.onnx
+!models/*.int8.onnx

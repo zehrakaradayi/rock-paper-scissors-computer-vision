@@ -52,7 +52,9 @@
 | Flatten → Dropout 0.5 → Linear(12544→2000) → ReLU → Dropout 0.5 → Linear(2000→3) | 3 |
 
 - Parametre: **25.6M** (conv blokları 0.54M, tam bağlı katmanlar 25.1M)
-- Eğitim: AdamW, lr 1e-3, cosine, weight decay, 60 epoch; en iyi val macro F1'deki ağırlıklar saklanır
+- Eğitim: AdamW, **lr 3e-4**, cosine, weight decay 0.05, label smoothing 0.1, 60 epoch; en iyi val macro F1'deki ağırlıklar saklanır
+- lr kararı (sadece validation'a bakılarak): 12 epoch'luk ön denemede lr 1e-3 → en iyi val F1 0.764 (ilk epoch loss 10.7, dalgalı);
+  lr 3e-4 → en iyi val F1 0.910. Model A için 3e-4 seçildi.
 - Risk: parametrelerin %98'i tam bağlı katmanda, 298 train fotoğrafıyla ezberleme (overfitting) riski yüksek
 
 ### Model B — ConvNeXt-Tiny (pretrained)
