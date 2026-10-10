@@ -4,7 +4,16 @@
 
 - Araç: `tools/capture_server.py` (laptop kamerasıyla tek tıkla çekim + telefon fotoğrafı yükleme)
 - Klasör yapısı: `dataset/rock`, `dataset/paper`, `dataset/scissors` (git'e eklenmez)
-- Fotoğraf sayıları: _(çekim bitince eklenecek)_
+- Fotoğraf sayıları (toplam 452):
+
+  | Sınıf | Toplam | Laptop | Telefon |
+  |---|---|---|---|
+  | rock | 152 | 106 | 46 |
+  | paper | 150 | 11 | 139 |
+  | scissors | 150 | 7 | 143 |
+
+- Not: 143 makas fotoğrafı yanlışlıkla `rock/` klasörüne yüklenmişti; görsel kontrolle `scissors/` klasörüne taşındı.
+- Not: paper ve scissors neredeyse tamamen telefonla çekildi; demo laptop kamerasıyla yapılacağı için bu bir risk.
 
 ## Aşama 2 — Data Cleaning
 
