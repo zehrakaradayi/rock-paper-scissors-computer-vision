@@ -129,4 +129,5 @@ Aynı train / val / test bölünmesi, aynı augmentation, aynı normalizasyon (I
 
 ## Aşama 6 — Productize ve Deploy
 
-_(yapılacak)_
+- **Kaybeden kaldırıldı:** Model B'nin dosyaları (`model_b.onnx`, `model_b.int8.onnx`, `model_b.pt`, `model_b.json`) silindi.
+  `training.ipynb`'deki Model B bölümü ve karşılaştırma, eğitimin kaydı olarak çıktılarıyla birlikte duruyor.
