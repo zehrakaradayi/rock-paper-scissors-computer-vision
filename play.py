@@ -36,6 +36,9 @@ _models_lock = threading.Lock()
 def load_models() -> list[dict]:
     """models/<isim>.json + models/<isim>.onnx çiftlerini yükler; değişen/yeni dosyaları yeniden okur."""
     with _models_lock:
+        for name in list(_models):  # dosyası silinen model sayfadan da kalkar
+            if not (MODELS / f"{name}.onnx").exists():
+                del _models[name]
         for meta_path in sorted(MODELS.glob("*.json")):
             onnx = meta_path.with_suffix(".onnx")
             if not onnx.exists():
