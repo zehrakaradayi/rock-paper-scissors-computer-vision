@@ -92,6 +92,29 @@ Aynı train / val / test bölünmesi, aynı augmentation, aynı normalizasyon (I
 - Not: test fotoğrafları train ile aynı çekim seanslarından (aynı oda, ışık, kişi). Skor çok yüksek ama gerçek
   hayattaki başarıyı asıl canlı deneme gösterecek.
 
+### Model B — ConvNeXt-Tiny (pretrained)
+- Adım 1 (gövde donuk, sadece head, 3.843 parametre): 5 epoch, lr 1e-3 → val F1 0.880
+- Adım 2 (stages[3] + head, 15.5M parametre): 10 epoch, lr 1e-4 → val F1 ilk epoch'ta 0.984'e sıçradı
+- En iyi validation macro F1: **1.000** (epoch 10); toplam ~2.5 dk
+- Son epoch: train F1 1.000, val F1 1.000
+- **Test macro F1: 1.000** (70 fotoğrafın hepsi doğru)
+- ONNX: `model_b.onnx` (111 MB, sadece sunucuda), `model_b.int8.onnx` (34 MB, repoda); int8 test macro F1 0.985
+
+### Karşılaştırma
+
+| Model | Parametre | Epoch | En iyi val macro F1 | Test macro F1 | F1 Taş | F1 Kağıt | F1 Makas | int8 test macro F1 |
+|---|---|---|---|---|---|---|---|---|
+| Model A — Sıfırdan CNN | 25.6M | 60 | 1.000 | **0.987** | 0.980 | 0.980 | 1.000 | 0.987 |
+| Model B — ConvNeXt-Tiny (pretrained) | 27.8M | 15 | 1.000 | **1.000** | 1.000 | 1.000 | 1.000 | 0.985 |
+
+- **Rakamlara göre önde: Model B** (test macro F1 1.000 vs 0.987). Fark 70 test fotoğrafında sadece 1 hata;
+  bu kadar küçük bir test setinde iki model rakamsal olarak neredeyse berabere.
+- **Tahminim ("B az farkla kazanır") doğru çıktı.**
+- Pretraining'in asıl farkı hızda: B, 15 epoch / ~2.5 dk'da val F1 1.000'e ulaştı; A 60 epoch / ~5 dk sürdü.
+- **Grad-CAM:** A makas ve taşta büyük ölçüde parmakların etrafındaki **arka plana** (duvar) bakıyor; B elin
+  kendisine (parmaklar, yumruğun ortası) daha çok odaklanıyor. A'nın farklı arka planlarda zorlanması bekleniyor.
+- int8 sürümlerde B 1 test fotoğrafını daha kaçırdı (0.985); A'da fark yok.
+
 ## Aşama 5 — Dene ve Karar Ver
 
 _(yapılacak)_

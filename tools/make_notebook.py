@@ -513,6 +513,8 @@ Aynı test fotoğrafları, solda Model A, sağda Model B. (Bu hücre için iki m
 """)
 code("""
 if "model_a" not in dir():
+    def conv_block(c_in, c_out):  # Bölüm 1.1'deki ile aynı
+        return nn.Sequential(nn.Conv2d(c_in, c_out, 3, padding=1), nn.BatchNorm2d(c_out), nn.ReLU(), nn.MaxPool2d(2))
     model_a = nn.Sequential(conv_block(3, 32), conv_block(32, 64), conv_block(64, 128), conv_block(128, 128),
                             conv_block(128, 256), nn.Flatten(), nn.Dropout(0.5), nn.Linear(256 * 7 * 7, 2000),
                             nn.ReLU(), nn.Dropout(0.5), nn.Linear(2000, len(CLASSES)))
