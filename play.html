@@ -29,6 +29,7 @@
   .seen { display:flex; gap:12px; align-items:center; margin-top:16px; color:var(--muted); font-size:13px; }
   .seen img { width:112px; height:112px; border-radius:8px; background:#111; }
   video { display:none; }
+  select { font:inherit; padding:6px 8px; border-radius:8px; border:1px solid var(--line); background:#fff; max-width:60vw; }
 </style>
 </head>
 <body>
@@ -36,6 +37,7 @@
   <header>
     <h1>Taş · Kağıt · Makas — deneme sayfası</h1>
     <span class="hint">Farklı açı, mesafe ve ışıkta dene: model nerede zorlanıyor?</span>
+    <label class="hint">Kamera <select id="camSel"></select></label>
   </header>
   <div class="status" id="status">Yükleniyor…</div>
   <div class="panels" id="panels"></div>
@@ -147,18 +149,35 @@ async function start() {
   }
   if (!models.length) return setStatus("Henüz eğitilmiş model yok: notebook'ta bir modeli eğitip ONNX'e aktar, sonra sayfayı yenile.", true);
   buildPanels();
-  setStatus("Kamera açılıyor…");
-  try {
-    video.srcObject = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
-    await video.play();
-  } catch (e) {
-    return setStatus("Kameraya erişilemedi. Lütfen izin ver.", true);
-  }
-  ready = true;
-  setStatus("");
+  if (!(await openCamera())) return;
   requestAnimationFrame(draw);
   loop();
 }
+
+async function openCamera(deviceId) {
+  ready = false; last = null;
+  setStatus("Kamera açılıyor…");
+  if (video.srcObject) video.srcObject.getTracks().forEach((t) => t.stop());
+  try {
+    video.srcObject = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 1280 }, height: { ideal: 720 }, ...(deviceId ? { deviceId: { exact: deviceId } } : {}) },
+      audio: false,
+    });
+    await video.play();
+  } catch (e) {
+    setStatus("Kameraya erişilemedi. Lütfen izin ver.", true);
+    return false;
+  }
+  // izin verildikten sonra kamera adları görünür: listeyi doldur, açık olanı seçili yap
+  const cams = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "videoinput");
+  const cur = video.srcObject.getVideoTracks()[0].getSettings().deviceId;
+  $("camSel").innerHTML = cams.map((d, i) =>
+    `<option value="${d.deviceId}" ${d.deviceId === cur ? "selected" : ""}>${d.label || "Kamera " + (i + 1)}</option>`).join("");
+  ready = true;
+  setStatus("");
+  return true;
+}
+$("camSel").addEventListener("change", (e) => openCamera(e.target.value));
 start();
 </script>
 </body>
