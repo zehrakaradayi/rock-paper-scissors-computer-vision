@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RPS Deneme Sayfası</title>
+<style>
+  :root { --bg:#f6f5f2; --card:#fff; --ink:#1d1d1f; --muted:#6b6b70; --line:#e3e1dc;
+          --rock:#c2410c; --paper:#1d4ed8; --scissors:#15803d; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width:1300px; margin:0 auto; padding:20px 16px 40px; }
+  header { display:flex; flex-wrap:wrap; gap:8px 20px; align-items:baseline; justify-content:space-between; margin-bottom:14px; }
+  h1 { font-size:20px; margin:0; }
+  .hint { color:var(--muted); font-size:13.5px; }
+  .status { padding:10px 14px; border-radius:10px; background:#fff7e6; border:1px solid #f5d9a6; margin-bottom:14px; }
+  .status.err { background:#fdecec; border-color:#f3b4b4; }
+  .panels { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap:16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; }
+  .card h2 { font-size:15px; margin:0 0 2px; }
+  .meta { color:var(--muted); font-size:13px; margin-bottom:10px; }
+  .stage { position:relative; background:#111; border-radius:10px; overflow:hidden; }
+  canvas { display:block; width:100%; height:auto; }
+  .bars { margin-top:12px; display:grid; gap:8px; }
+  .bar { display:grid; grid-template-columns:64px 1fr 48px; gap:10px; align-items:center; font-variant-numeric:tabular-nums; }
+  .track { height:12px; background:#eceae5; border-radius:99px; overflow:hidden; }
+  .fill { height:100%; width:0; border-radius:99px; transition:width .15s; }
+  .pct { text-align:right; }
+  .seen { display:flex; gap:12px; align-items:center; margin-top:16px; color:var(--muted); font-size:13px; }
+  .seen img { width:112px; height:112px; border-radius:8px; background:#111; }
+  video { display:none; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Taş · Kağıt · Makas — deneme sayfası</h1>
+    <span class="hint">Farklı açı, mesafe ve ışıkta dene: model nerede zorlanıyor?</span>
+  </header>
+  <div class="status" id="status">Yükleniyor…</div>
+  <div class="panels" id="panels"></div>
+  <div class="seen" id="seen" hidden><img id="crop" alt=""><span>Modelin gördüğü: eğitimdekiyle aynı şekilde kırpılmış el (224×224)</span></div>
+  <video id="video" autoplay playsinline muted></video>
+</main>
+
+<script>
+const NAMES = { rock: "Taş", paper: "Kağıt", scissors: "Makas" };
+const COLORS = { rock: "#c2410c", paper: "#1d4ed8", scissors: "#15803d" };
+const ORDER = ["rock", "paper", "scissors"];
+const $ = (id) => document.getElementById(id);
+const video = $("video");
+const grab = document.createElement("canvas");
+let models = [], last = null, ready = false;
+
+if (!location.pathname.endsWith("/")) location.replace(location.pathname + "/" + location.search);
+
+function setStatus(text, err = false) {
+  $("status").hidden = !text;
+  $("status").textContent = text || "";
+  $("status").classList.toggle("err", err);
+}
+
+function buildPanels() {
+  $("panels").innerHTML = models.map((m) => `
+    <section class="card">
+      <h2>${m.title}</h2>
+      <div class="meta">Test macro F1: ${m.macro_f1.toFixed(3)}</div>
+      <div class="stage"><canvas id="cv-${m.name}" width="640" height="480"></canvas></div>
+      <div class="bars">${ORDER.map((c) => `
+        <div class="bar"><span>${NAMES[c]}</span>
+          <div class="track"><div class="fill" id="f-${m.name}-${c}" style="background:${COLORS[c]}"></div></div>
+          <span class="pct" id="p-${m.name}-${c}">–</span></div>`).join("")}
+      </div>
+    </section>`).join("");
+}
+
+function draw() {
+  const w = video.videoWidth, h = video.videoHeight;
+  if (w) for (const m of models) {
+    const cv = $("cv-" + m.name);
+    if (cv.width !== w) { cv.width = w; cv.height = h; }
+    const ctx = cv.getContext("2d");
+    ctx.save(); ctx.translate(w, 0); ctx.scale(-1, 1); ctx.drawImage(video, 0, 0, w, h); ctx.restore();  // ayna görüntü
+    const r = last && last.hand && last.models[m.name];
+    if (r) {
+      const [x0, y0, x1, y1] = last.box;
+      const bx = (1 - x1) * w, by = y0 * h, bw = (x1 - x0) * w, bh = (y1 - y0) * h;
+      const col = COLORS[r.label];
+      ctx.lineWidth = Math.max(3, w / 200); ctx.strokeStyle = col; ctx.strokeRect(bx, by, bw, bh);
+      const text = `${NAMES[r.label]} %${Math.round(r.conf * 100)}`;
+      ctx.font = `600 ${Math.max(18, w / 26)}px system-ui, sans-serif`;
+      const tw = ctx.measureText(text).width + 16, th = Math.max(28, w / 18);
+      const ty = by - th < 0 ? by : by - th;
+      ctx.fillStyle = col; ctx.fillRect(bx - ctx.lineWidth / 2, ty, tw, th);
+      ctx.fillStyle = "#fff"; ctx.textBaseline = "middle"; ctx.fillText(text, bx + 8 - ctx.lineWidth / 2, ty + th / 2);
+    } else if (ready) {
+      ctx.fillStyle = "rgba(0,0,0,.45)"; ctx.fillRect(0, h - 56, w, 56);
+      ctx.fillStyle = "#fff"; ctx.font = `600 ${Math.max(18, w / 30)}px system-ui, sans-serif`;
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(last && last.error ? "Bağlantı hatası" : "Elini kameraya göster", w / 2, h - 28);
+      ctx.textAlign = "start";
+    }
+  }
+  requestAnimationFrame(draw);
+}
+
+function updateBars() {
+  for (const m of models) {
+    const r = last && last.hand && last.models[m.name];
+    for (const c of ORDER) {
+      const p = r ? r.probs[c] : 0;
+      $(`f-${m.name}-${c}`).style.width = `${p * 100}%`;
+      $(`p-${m.name}-${c}`).textContent = r ? `%${Math.round(p * 100)}` : "–";
+    }
+  }
+  $("seen").hidden = !(last && last.hand);
+  if (last && last.crop) $("crop").src = last.crop;
+}
+
+async function loop() {
+  const w = video.videoWidth, h = video.videoHeight;
+  if (w) {
+    const s = Math.min(1, 960 / w);
+    grab.width = Math.round(w * s); grab.height = Math.round(h * s);
+    grab.getContext("2d").drawImage(video, 0, 0, grab.width, grab.height);  // modele aynasız kare gider
+    const blob = await new Promise((r) => grab.toBlob(r, "image/jpeg", 0.85));
+    try {
+      const res = await fetch("predict", { method: "POST", body: blob });
+      last = await res.json();
+      if (!res.ok) throw new Error(last.error || res.status);
+      setStatus("");
+    } catch (e) {
+      last = { error: true };
+      setStatus("Sunucuya ulaşılamadı: " + e.message + " (play.py çalışıyor mu?)", true);
+    }
+    updateBars();
+  }
+  setTimeout(loop, 60);
+}
+
+async function start() {
+  setStatus("Modeller yükleniyor…");
+  try {
+    models = await (await fetch("models")).json();
+  } catch (e) {
+    return setStatus("Sunucuya ulaşılamadı. play.py çalışıyor mu?", true);
+  }
+  if (!models.length) return setStatus("Henüz eğitilmiş model yok: notebook'ta bir modeli eğitip ONNX'e aktar, sonra sayfayı yenile.", true);
+  buildPanels();
+  setStatus("Kamera açılıyor…");
+  try {
+    video.srcObject = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+    await video.play();
+  } catch (e) {
+    return setStatus("Kameraya erişilemedi. Lütfen izin ver.", true);
+  }
+  ready = true;
+  setStatus("");
+  requestAnimationFrame(draw);
+  loop();
+}
+start();
+</script>
+</body>
+</html>

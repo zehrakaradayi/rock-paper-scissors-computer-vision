@@ -76,7 +76,21 @@ Aynı train / val / test bölünmesi, aynı augmentation, aynı normalizasyon (I
 
 ## Aşama 4 — Training ve Metrikler
 
-_(yapılacak)_
+### Model A — Sıfırdan CNN
+- 60 epoch, lr 3e-4, epoch başına ~4 sn (CPU, 48 thread); toplam ~5 dk
+- En iyi validation macro F1: **1.000** (epoch 31, bu ağırlıklar kullanıldı)
+- Son epoch: train F1 0.990, val F1 0.970 → train ile val arası fark küçük, belirgin overfitting yok
+- **Test macro F1: 0.987** (70 fotoğrafta 1 hata: bir taş kağıt sanıldı)
+
+  | Sınıf | F1 |
+  |---|---|
+  | Taş | 0.980 |
+  | Kağıt | 0.980 |
+  | Makas | 1.000 |
+
+- ONNX: `model_a.onnx` (103 MB, sadece sunucuda), `model_a.int8.onnx` (27 MB, repoda); int8 test macro F1 0.987
+- Not: test fotoğrafları train ile aynı çekim seanslarından (aynı oda, ışık, kişi). Skor çok yüksek ama gerçek
+  hayattaki başarıyı asıl canlı deneme gösterecek.
 
 ## Aşama 5 — Dene ve Karar Ver
 
