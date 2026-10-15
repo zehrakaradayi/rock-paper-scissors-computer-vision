@@ -156,3 +156,4 @@ Aynı train / val / test bölünmesi, aynı augmentation, aynı normalizasyon (I
   | Taş | Taş %96 |
   | Kağıt | Kağıt %93 |
   | Makas | Makas %97 |
+- **Telefon testi:** canlı link telefonda açıldı, ön kamerayla çalışıyor (öğrenci denedi).
