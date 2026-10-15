@@ -111,7 +111,7 @@
 if (!location.pathname.endsWith("/")) location.replace(location.pathname + "/" + location.search);
 const NAMES = { rock: "Taş", paper: "Kağıt", scissors: "Makas" };
 const COLORS = { rock: "var(--rock)", paper: "var(--paper)", scissors: "var(--scissors)" };
-const TARGET = 150;
+const TARGET = +new URLSearchParams(location.search).get("target") || 150;  // ?target=25
 const $ = (id) => document.getElementById(id);
 const video = $("video");
 let stream = null, busy = false;

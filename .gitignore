@@ -1,6 +1,9 @@
 # Ham ve işlenmiş fotoğraflar (kişisel + büyük) — Google Drive'da saklanır
 dataset/
+dataset_zor/
 data/
+mistakes/
+odev_5_hata.pdf
 .venv/
 __pycache__/
 .ipynb_checkpoints/

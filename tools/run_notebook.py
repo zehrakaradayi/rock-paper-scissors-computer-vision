@@ -3,6 +3,7 @@
 Kullanım:  .venv/bin/python tools/run_notebook.py A      # Bölüm 0 + Bölüm 1 (Model A)
            .venv/bin/python tools/run_notebook.py B      # Bölüm 0 + Bölüm 2 (Model B)
            .venv/bin/python tools/run_notebook.py C      # Bölüm 0 + Bölüm 3 (karşılaştırma)
+           .venv/bin/python tools/run_notebook.py D      # Bölüm 0 + Bölüm 4 (ödev: 5 hata)
 
 Her hücreden sonra notebook diske yazılır; VS Code'da açıksan "Revert File" ile güncel halini görürsün.
 """
@@ -15,7 +16,7 @@ from nbclient import NotebookClient
 
 ROOT = Path(__file__).resolve().parent.parent
 NB = ROOT / "training.ipynb"
-SECTION_TITLES = {"0": "## Bölüm 0", "A": "## Bölüm 1", "B": "## Bölüm 2", "C": "## Bölüm 3"}
+SECTION_TITLES = {"0": "## Bölüm 0", "A": "## Bölüm 1", "B": "## Bölüm 2", "C": "## Bölüm 3", "D": "## Bölüm 4"}
 
 
 def sections(nb):

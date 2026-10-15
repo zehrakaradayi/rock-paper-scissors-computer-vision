@@ -537,6 +537,256 @@ for col, i in enumerate(idx):
 plt.tight_layout(); plt.show()
 """)
 
+md("""
+---
+## Bölüm 4 — Ödev: 5 hata (Model B)
+
+Deneme sayfasında Model B'nin yanıldığı 5 an `mistakes/` klasörüne kaydedildi (ekran görüntüsü, kırpılmış el, Grad-CAM).
+Hepsi 10 Ekim'deki eğitim fotoğraflarından farklı bir odada: çizgili duvar, sıcak ışık, desenli kol.
+
+| # | Gösterilen → Model B | Neden (Grad-CAM) |
+|---|---|---|
+| 1 | Makas → Taş %52 | parmaklar **aşağıyı** gösteriyor; model bileğe / kola bakıyor |
+| 2 | Kağıt → Makas %64 | el yandan ve küçük, **çizgili duvar**; ısı haritası çizgilere dağılmış |
+| 3 | Makas → Taş %57 | el **yüzün / saçın önünde**; parmaklar saçla karışıyor |
+| 4 | Makas → Kağıt %48 | el saçın önünde, parmaklar bitişik, arkadan turuncu ışık |
+| 5 | Kağıt → Taş %47 | parmaklar **aşağıyı** gösteriyor; model kola bakıyor |
+
+**Düzeltmeler — her seferinde tek değişiklik, sonra yeniden eğitim:**
+1. Augmentation'da döndürme ±20° → **±180°** (yeni fotoğraf yok) → hata 1 ve 5
+1b. \\+ her sınıfa 15 **"parmaklar aşağı"** fotoğrafı (düzeltme 1 hata 1'i düzeltemedi) → hata 1 ve 5
+2. \\+ her sınıfa 15 **"el yüzün / saçın önünde"** fotoğrafı → hata 3 ve 4
+3. \\+ her sınıfa 15 **"çizgili duvar, yandan, uzak"** fotoğrafı → hata 2
+
+**Nasıl ölçüyoruz?** Eski test seti (70 fotoğraf) Model B'de zaten 1.000; iyileşmeyi göremez. Bu yüzden bugünkü odada
+çekilen fotoğrafların bir kısmı sadece teste ayrıldı: **zor test seti** (`data/zor/test/`, `tools/prepare_zor.py`).
+Zor test fotoğrafları eğitime asla girmez. Her düzeltme iki yerde ölçülür: zor test (düzeldi mi?) ve eski test (bir şey bozuldu mu?).
+Validation seti ve eğitim tarifi (Bölüm 2.2) hiç değişmez.
+""")
+
+md("""
+### 4.1 Zor test seti ve ölçüm fonksiyonları
+**Çıktıda bak:** her durumda sınıf sayıları birbirine yakın olmalı.
+""")
+code("""
+import timm
+from PIL import Image
+from torch.utils.data import ConcatDataset
+
+ZOR = ROOT / "data" / "zor"        # tools/prepare_zor.py üretir; data/split/'e dokunmaz
+MISTAKES = ROOT / "mistakes"       # deneme sayfasında kaydedilen hatalar (play.py)
+
+
+def zor_sets(split, tf):
+    \"\"\"data/zor/<split>/<durum>/<sınıf>/ → {durum: ImageFolder}\"\"\"
+    out = {}
+    for d in sorted((ZOR / split).glob("*")):
+        ds = datasets.ImageFolder(d, tf)
+        assert ds.classes == CLASSES, (d, ds.classes)
+        out[d.name] = ds
+    return out
+
+
+zor_test = zor_sets("test", eval_tf)
+for name, ds in zor_test.items():
+    counts = np.bincount(ds.targets, minlength=len(CLASSES))
+    print(f"zor test / {name:8s}", "  ".join(f"{TR[c]} {n:3d}" for c, n in zip(CLASSES, counts)), f"| toplam {len(ds)}")
+
+RESULTS = {}
+
+
+def measure(model, label, show=True):
+    \"\"\"Eski test + her zor durum + bütün zor test için macro F1; sonuç tablosuna bir satır ekler.\"\"\"
+    import pandas as pd
+    row = {"Eski test (70)": run_epoch(model, test_dl)[1]}
+    for name, ds in zor_test.items():
+        row[f"Zor: {name} ({len(ds)})"] = run_epoch(model, loader(ds, False))[1]
+    allz = ConcatDataset(list(zor_test.values()))
+    row[f"Zor: hepsi ({len(allz)})"] = run_epoch(model, loader(allz, False))[1]
+    RESULTS[label] = {k: round(float(v), 3) for k, v in row.items()}
+    if show:
+        display(pd.DataFrame(RESULTS).T)
+
+
+def show_mistakes(models):
+    \"\"\"Kaydedilen yanlış tahminlerin kırpması: her model için tahmin + Grad-CAM. models = [(isim, model), ...]\"\"\"
+    items = [d for d in sorted(MISTAKES.glob("*"))
+             if (d / "info.json").exists() and json.loads((d / "info.json").read_text())["wrong"]]
+    fig, axes = plt.subplots(len(models), len(items), figsize=(2.6 * len(items), 3.0 * len(models)), squeeze=False)
+    for col, d in enumerate(items):
+        showed = json.loads((d / "info.json").read_text())["showed"]
+        x = eval_tf(Image.open(d / "crop.jpg").convert("RGB"))
+        for row, (name, m) in enumerate(models):
+            cam, pred, conf = gradcam(m, m.stages[-1], x[None])
+            ax = axes[row, col]
+            ax.imshow(to_rgb(x)); ax.imshow(cam, cmap="jet", alpha=0.45); ax.axis("off")
+            ax.set_title(f"{name} · hata {col + 1}\\n{TR[showed]} → {TR[CLASSES[pred]]} %{conf * 100:.0f}", fontsize=9,
+                         color="green" if CLASSES[pred] == showed else "red")
+    plt.tight_layout(); plt.show()
+
+
+def set_trainable(model, parts):  # Bölüm 2.1'deki ile aynı
+    for p in model.parameters():
+        p.requires_grad = False
+    for part in parts:
+        for p in part.parameters():
+            p.requires_grad = True
+
+
+def fit_b(train_set, name):
+    \"\"\"Bölüm 2.2 ile aynı tarif: 5 epoch sadece head (lr 1e-3), sonra 10 epoch son aşama + head (lr 1e-4).\"\"\"
+    global train_dl  # train() bu loader'ı kullanır
+    train_dl = loader(train_set, True)
+    torch.manual_seed(SEED)
+    m = timm.create_model("convnext_tiny.fb_in22k_ft_in1k", pretrained=True, num_classes=len(CLASSES))
+    set_trainable(m, [m.head]); h = train(m, 5, 1e-3, [], name)
+    set_trainable(m, [m.stages[-1], m.head]); h = train(m, 10, 1e-4, h, name)
+    torch.save(m.state_dict(), MODELS / f"{name}.pt")
+    return m
+""")
+
+md("""
+### 4.2 Önce: Bölüm 2'de eğitilen Model B
+**Çıktıda bak:** eski testte ~1.000 ama zor testte belirgin şekilde düşük olmalı. Alttaki resimler deneme sayfasındaki 5 hata (kırmızı = yanlış).
+""")
+code("""
+model_b0 = timm.create_model("convnext_tiny.fb_in22k_ft_in1k", pretrained=False, num_classes=len(CLASSES))
+model_b0.load_state_dict(torch.load(MODELS / "model_b.pt"))
+measure(model_b0, "Önce: Model B")
+show_mistakes([("Önce", model_b0)])
+""")
+
+md("""
+### 4.3 Düzeltme 1 — döndürme ±20° → ±180° (hata 1 ve 5: parmaklar aşağı)
+Eğitim fotoğraflarında parmaklar hep yukarıdaydı; ±20° döndürme bunu değiştirmez. ±180° ile model eli her yönde görür.
+Yeni fotoğraf eklenmez, sadece augmentation değişir.
+
+**Çıktıda bak:** "Zor: asagi" yükseldi mi? Eski test düşmedi mi?
+""")
+code("""
+train_tf_rot = transforms.Compose([
+    transforms.RandomResizedCrop(IMG_SIZE, scale=(0.7, 1.0), ratio=(0.85, 1.18)),
+    transforms.RandomHorizontalFlip(),
+    transforms.RandomRotation(180),               # tek değişiklik: 20 → 180
+    transforms.ColorJitter(brightness=0.35, contrast=0.35, saturation=0.25, hue=0.03),
+    transforms.ToTensor(),
+    transforms.Normalize(MEAN, STD),
+])
+train_rot = datasets.ImageFolder(SPLIT / "train", train_tf_rot)
+model_b1 = fit_b(train_rot, "model_b_fix1")
+measure(model_b1, "Düzeltme 1: döndürme ±180°")
+""")
+
+md("""
+### 4.3b Düzeltme 1b — + "parmaklar aşağı" fotoğrafları (hata 1 ve 5)
+Düzeltme 1 aşağı bakan makasları düzeltmedi (9'un 8'i hâlâ Taş): döndürülmüş eğitim fotoğrafında el hâlâ avuç içi
+tarafından ve düz kolla görünüyor, gerçekte ise el üstü ve desenli kol görünüyor. Düzeltme 1'in üstüne: her sınıfa 15 gerçek
+"parmaklar aşağı" fotoğrafı (test için ayrılan 10'ar fotoğraftan sonra, ayrı çekildi).
+
+**Çıktıda bak:** "Zor: asagi" yükseldi mi? Eski test düşmedi mi?
+""")
+code("""
+zor_train = zor_sets("train", train_tf_rot)
+for name, ds in zor_train.items():
+    print(f"zor train / {name:8s}", "  ".join(f"{TR[c]} {n:3d}" for c, n in zip(CLASSES, np.bincount(ds.targets, minlength=len(CLASSES)))))
+model_b1b = fit_b(ConcatDataset([train_rot, zor_train["asagi"]]), "model_b_fix1b")
+measure(model_b1b, "Düzeltme 1b: + parmaklar aşağı fotoğrafları")
+""")
+
+md("""
+### 4.4 Düzeltme 2 — + "el yüzün / saçın önünde" fotoğrafları (hata 3 ve 4)
+Düzeltme 1b'nin üstüne: her sınıfa aynı sayıda (15) yeni eğitim fotoğrafı. Sadece bir sınıfa eklemek dengeyi bozar ve
+"yüz kutuda = makas" gibi bir kısayol öğretebilir.
+
+**Çıktıda bak:** "Zor: yuz" yükseldi mi? Diğer sütunlar düşmedi mi?
+""")
+code("""
+if "yuz" in zor_train:
+    model_b2 = fit_b(ConcatDataset([train_rot, zor_train["asagi"], zor_train["yuz"]]), "model_b_fix2")
+    measure(model_b2, "Düzeltme 2: + yüz/saç fotoğrafları")
+else:
+    print("data/zor/train/yuz yok: önce fotoğrafları çek ve tools/prepare_zor.py çalıştır")
+""")
+
+md("""
+### 4.5 Düzeltme 3 — + "çizgili duvar, yandan, uzak" fotoğrafları (hata 2)
+Düzeltme 2'nin üstüne: her sınıfa 15 yeni eğitim fotoğrafı.
+
+**Çıktıda bak:** "Zor: cizgili" yükseldi mi? Diğer sütunlar düşmedi mi?
+""")
+code("""
+if "yuz" in zor_train and "cizgili" in zor_train:
+    model_b3 = fit_b(ConcatDataset([train_rot, zor_train["asagi"], zor_train["yuz"], zor_train["cizgili"]]), "model_b_fix3")
+    measure(model_b3, "Düzeltme 3: + çizgili duvar fotoğrafları")
+else:
+    print("data/zor/train/cizgili yok: önce fotoğrafları çek ve tools/prepare_zor.py çalıştır")
+""")
+
+md("""
+### 4.6 Özet — 5 hata önce ve sonra
+**Çıktıda bak:** üstteki tablo ödevdeki "macro F1 önce / sonra" sayıları. Alttaki resimlerde her satır bir model:
+kırmızı başlık yanlış, yeşil doğru. Isı haritası parmaklara kaydı mı?
+""")
+code("""
+import pandas as pd
+display(pd.DataFrame(RESULTS).T)
+show_mistakes([(n, m) for n, m in [("Önce", model_b0), ("Düz. 1", globals().get("model_b1")), ("Düz. 1b", globals().get("model_b1b")),
+                                   ("Düz. 2", globals().get("model_b2")), ("Düz. 3", globals().get("model_b3"))]
+               if m is not None])
+(MODELS / "odev_sonuclar.json").write_text(json.dumps(RESULTS, ensure_ascii=False, indent=2))
+""")
+
+md("""
+### 4.7 Son modeli deneme sayfasına ver
+Son düzeltilmiş model ONNX'e aktarılır (`models/model_b_fix.onnx`); `play.py` onu yeni bir panel olarak gösterir.
+Sayfayı yenile ve 5 hatayı kamerada tekrar dene.
+""")
+code("""
+final = globals().get("model_b3") or globals().get("model_b2") or model_b1
+res_final = evaluate(final, test_dl, "Düzeltilmiş Model B — eski test")
+export_onnx(final, "model_b_fix", dict(title="Model B — düzeltilmiş (ödev)",
+                                       params=sum(p.numel() for p in final.parameters()), test=res_final,
+                                       zor=list(RESULTS.values())[-1]))
+""")
+
+
+md("""
+### 4.8 Şans payı kontrolü — her adım 3 seed ile
+Yukarıdaki her satır **tek bir eğitimin** sonucu (seed 42). Zor test setleri küçük (27–30 fotoğraf, 1 fotoğraf ≈ 0.03) ve
+aynı tarif farklı seed ile ±0.05 oynayabiliyor. Bu hücre her adımı seed 1 ve 2 ile yeniden eğitir (10 eğitim, ~20 dk) ve
+3 seed'in **ortalamasını** ve **en düşük–en yüksek** değerini gösterir. Önce/sonra kararını bu tabloya göre ver.
+
+**Çıktıda bak:** iki adım arasındaki fark, aralıkların (min–max) genişliğinden büyük mü? Değilse fark şans olabilir.
+""")
+code("""
+import pandas as pd
+
+STEPS = {  # adım → eğitim seti (Bölüm 4.3–4.5 ile aynı)
+    "Önce: Model B": [train_ds],
+    "Düzeltme 1: döndürme ±180°": [train_rot],
+    "Düzeltme 1b: + parmaklar aşağı fotoğrafları": [train_rot, zor_train["asagi"]],
+    "Düzeltme 2: + yüz/saç fotoğrafları": [train_rot, zor_train["asagi"], zor_train["yuz"]],
+    "Düzeltme 3: + çizgili duvar fotoğrafları": [train_rot, zor_train["asagi"], zor_train["yuz"], zor_train["cizgili"]],
+}
+RUNS = {step: [RESULTS[step]] for step in STEPS}  # seed 42 = yukarıdaki sonuçlar
+for seed in (1, 2):
+    SEED = seed
+    for step, parts in STEPS.items():
+        m = fit_b(ConcatDataset(parts), "tmp_seed")
+        measure(m, f"{step} · seed {seed}", show=False)
+        RUNS[step].append(RESULTS.pop(f"{step} · seed {seed}"))
+SEED = 42
+(MODELS / "tmp_seed.pt").unlink(missing_ok=True)
+
+summary = {}
+for step, runs in RUNS.items():
+    df = pd.DataFrame(runs)
+    summary[step] = {c: f"{df[c].mean():.3f}  ({df[c].min():.2f}–{df[c].max():.2f})" for c in df.columns}
+(MODELS / "odev_sonuclar_3seed.json").write_text(json.dumps(
+    {s: {c: [r[c] for r in runs] for c in runs[0]} for s, runs in RUNS.items()}, ensure_ascii=False, indent=2))
+pd.DataFrame(summary).T
+""")
+
 nb = {"cells": cells, "metadata": {"kernelspec": {"name": "python3", "display_name": "Python 3 (.venv)",
                                                   "language": "python"},
                                    "language_info": {"name": "python"}},

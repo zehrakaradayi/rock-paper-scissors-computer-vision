@@ -29,6 +29,17 @@
   .seen { display:flex; gap:12px; align-items:center; margin-top:16px; color:var(--muted); font-size:13px; }
   .seen img { width:112px; height:112px; border-radius:8px; background:#111; }
   video { display:none; }
+  .save { margin-top:16px; }
+  .save .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  .save button { font:inherit; font-weight:600; color:#fff; border:0; border-radius:8px; padding:8px 14px; cursor:pointer; }
+  .save button:disabled { opacity:.5; cursor:wait; }
+  .save .msg { color:var(--muted); font-size:13.5px; }
+  .gallery { display:grid; grid-template-columns:repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap:12px; margin-top:12px; }
+  .item { border:1px solid var(--line); border-radius:10px; padding:8px; font-size:13px; }
+  .item.ok { opacity:.6; }
+  .item .imgs { display:grid; grid-template-columns:2fr 1fr 1fr; gap:6px; align-items:center; }
+  .item img { width:100%; border-radius:6px; display:block; }
+  .item b.bad { color:#b91c1c; }
   select { font:inherit; padding:6px 8px; border-radius:8px; border:1px solid var(--line); background:#fff; max-width:60vw; }
 </style>
 </head>
@@ -42,6 +53,19 @@
   <div class="status" id="status">Yükleniyor…</div>
   <div class="panels" id="panels"></div>
   <div class="seen" id="seen" hidden><img id="crop" alt=""><span>Modelin gördüğü: eğitimdekiyle aynı şekilde kırpılmış el (224×224)</span></div>
+  <section class="card save">
+    <h2>Hatayı kaydet (ödev: 5 hata)</h2>
+    <div class="meta">Model B yanlış tahmin edince, gerçekte ne gösterdiğini seç. Klavye: 1 = Taş, 2 = Kağıt, 3 = Makas.
+      Ekran görüntüsü, kırpılmış el ve Grad-CAM <code>mistakes/</code> klasörüne kaydedilir.</div>
+    <div class="row">
+      <span>Gösterdiğim:</span>
+      <button data-c="rock" style="background:var(--rock)">1 · Taş</button>
+      <button data-c="paper" style="background:var(--paper)">2 · Kağıt</button>
+      <button data-c="scissors" style="background:var(--scissors)">3 · Makas</button>
+      <span class="msg" id="saveMsg"></span>
+    </div>
+    <div class="gallery" id="gallery"></div>
+  </section>
   <video id="video" autoplay playsinline muted></video>
 </main>
 
@@ -178,6 +202,56 @@ async function openCamera(deviceId) {
   return true;
 }
 $("camSel").addEventListener("change", (e) => openCamera(e.target.value));
+
+// --- Hatayı kaydet ---
+async function frameBlob() {
+  const c = document.createElement("canvas"), w = video.videoWidth, h = video.videoHeight;
+  const s = Math.min(1, 1280 / w);
+  c.width = Math.round(w * s); c.height = Math.round(h * s);
+  c.getContext("2d").drawImage(video, 0, 0, c.width, c.height);  // aynasız ham kare
+  return new Promise((r) => c.toBlob(r, "image/jpeg", 0.92));
+}
+
+async function saveMistake(showed) {
+  if (!ready) return;
+  const btns = document.querySelectorAll(".save button");
+  btns.forEach((b) => (b.disabled = true));
+  $("saveMsg").textContent = "Kaydediliyor…";
+  try {
+    const res = await (await fetch("save?showed=" + showed, { method: "POST", body: await frameBlob() })).json();
+    if (!res.ok) throw new Error(res.error || "hata");
+    $("saveMsg").textContent = res.wrong
+      ? `Kaydedildi ✓ Gösterilen ${NAMES[res.showed]}, Model B: ${NAMES[res.said]} %${Math.round(res.conf * 100)}`
+      : `Kaydedildi, ama Model B bu karede doğru bildi (${NAMES[res.said]} %${Math.round(res.conf * 100)}).`;
+    loadGallery();
+  } catch (e) {
+    $("saveMsg").textContent = "Kaydedilemedi: " + e.message;
+  }
+  btns.forEach((b) => (b.disabled = false));
+}
+
+async function loadGallery() {
+  const items = await (await fetch("mistakes")).json();
+  const wrong = items.filter((m) => m.wrong).length;
+  $("gallery").innerHTML = items.slice().reverse().map((m) => `
+    <div class="item ${m.wrong ? "" : "ok"}">
+      <div class="imgs">
+        <img src="mistakes/${m.id}/screenshot.jpg" alt="">
+        <img src="mistakes/${m.id}/crop.jpg" alt="">
+        ${m.has_cam ? `<img src="mistakes/${m.id}/gradcam.jpg" alt="">` : "<span></span>"}
+      </div>
+      <div>Gösterilen <b>${NAMES[m.showed]}</b> → Model B <b class="${m.wrong ? "bad" : ""}">${NAMES[m.said]} %${Math.round(m.conf * 100)}</b>
+        <span class="hint">· ${m.id}</span></div>
+    </div>`).join("");
+  document.querySelector(".save h2").textContent = `Hatayı kaydet (ödev: 5 hata) — ${wrong} / 5 yanlış tahmin kaydedildi`;
+}
+
+document.querySelectorAll(".save button").forEach((b) => b.addEventListener("click", () => saveMistake(b.dataset.c)));
+document.addEventListener("keydown", (e) => {
+  const c = { "1": "rock", "2": "paper", "3": "scissors" }[e.key];
+  if (c && !e.repeat && e.target.tagName !== "SELECT") saveMistake(c);
+});
+loadGallery();
 start();
 </script>
 </body>

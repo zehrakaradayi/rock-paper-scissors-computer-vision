@@ -157,3 +157,28 @@ Aynı train / val / test bölünmesi, aynı augmentation, aynı normalizasyon (I
   | Kağıt | Kağıt %93 |
   | Makas | Makas %97 |
 - **Telefon testi:** canlı link telefonda açıldı, ön kamerayla çalışıyor (öğrenci denedi).
+
+## Ödev — 5 Hata (Model B)
+
+- Model B yeniden eğitildi (Bölüm 2, seed 42; sonuçlar 10 Ekim'dekiyle aynı: test macro F1 1.000). Deneme sayfasına
+  "Hatayı kaydet" eklendi: ekran görüntüsü + kırpma + Grad-CAM → `mistakes/`. Bugünkü odada (çizgili duvar, sıcak ışık,
+  desenli kol) 5 yanlış tahmin kaydedildi: 2× parmaklar aşağı, 2× el yüzün / saçın önünde, 1× yandan görünen el + çizgili duvar.
+- **Zor test seti:** eski test (70) Model B'de ~1.000, iyileşmeyi göstermiyor. Bugünkü odada her durum için yeni fotoğraf
+  çekildi (`dataset_zor/`, `tools/prepare_zor.py`); bir kısmı sadece teste ayrıldı (87 fotoğraf, eğitime hiç girmedi),
+  kalanı eğitime eklendi. Eli bulunamayan 25 fotoğraf atıldı; her (durum, split) için sınıflar eşit sayıya indirildi.
+- Düzeltmeler (her biri bir öncekinin üstüne, tek değişiklik, `training.ipynb` Bölüm 4). Macro F1, 3 seed ortalaması:
+
+  | Adım | Eski test (70) | Zor: aşağı (27) | Zor: çizgili (30) | Zor: yüz (30) | Zor: hepsi (87) |
+  |---|---|---|---|---|---|
+  | Önce | 0.995 | 0.553 | 0.783 | 0.694 | **0.710** |
+  | 1: döndürme ±20° → ±180° | 0.985 | 0.668 | 0.888 | 0.631 | **0.746** |
+  | 1b: + 11 "aşağı" / sınıf | 0.976 | 0.713 | 0.890 | 0.728 | **0.785** |
+  | 2: + 10 "yüz/saç" / sınıf | 0.985 | 0.739 | 0.878 | 0.897 | **0.850** |
+  | 3: + 11 "çizgili duvar" / sınıf | 0.990 | 0.714 | 0.922 | 0.920 | **0.863** |
+
+- **Şans payı:** aynı tarif sadece seed değişince ±0.05 oynuyor. Tek eğitimle (seed 42) bakılınca Düzeltme 3 "kötüleştirdi"
+  görünüyordu (0.872 → 0.797); 3 seed ortalamasında aslında hafif iyileştiriyor. Karar 3 seed ortalamasıyla verildi.
+- **5 hatadan 3'ü düzeldi** (yüz/saç önündeki iki makas, aşağı bakan kağıt). Düzelmeyenler: aşağı bakan makas (eklenen aşağı
+  fotoğraflarında desenli kol yoktu) ve yandan görünen kağıt (çizgili duvar fotoğraflarında yan dönük el yoktu).
+- Teslim PDF'i: `tools/make_report.py` → `odev_5_hata.pdf` (kişisel fotoğraflar içerdiği için repoda değil).
+- Web'deki ürün değişmedi: hâlâ Model A (Aşama 5–6 kararı).

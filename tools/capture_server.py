@@ -4,6 +4,7 @@ Laptop kamerasıyla tek tıkla fotoğraf çekip dataset/<sınıf>/ klasörüne k
 Telefonla çekilen fotoğrafları da aynı sayfadan yükleyebilirsin.
 
 Çalıştırma:  python3 tools/capture_server.py   →  http://localhost:8765
+             python3 tools/capture_server.py 8766 dataset_zor/yuz   (başka port + başka kayıt klasörü)
 """
 
 import json
@@ -14,7 +15,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).resolve().parent.parent
-DATASET = ROOT / "dataset"
+DATASET = ROOT / (sys.argv[2] if len(sys.argv) > 2 else "dataset")
 PAGE = Path(__file__).resolve().parent / "capture.html"
 CLASSES = ("rock", "paper", "scissors")
 EXTS = {".jpg", ".jpeg", ".png", ".webp", ".heic"}
