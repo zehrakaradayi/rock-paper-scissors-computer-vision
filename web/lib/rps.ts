@@ -14,8 +14,10 @@ export type ModelMeta = {
   std: number[];
   crop_margin: number;
   test_macro_f1: number;
+  zor_macro_f1?: number; // ödevdeki zor test seti (87 foto)
   file: string;
 };
+export type Classifier = Awaited<ReturnType<typeof loadClassifier>>;
 export type Box = { x: number; y: number; size: number }; // video pikseli, kare
 export type Prediction = { probs: Record<Label, number>; label: Label; conf: number };
 
@@ -76,7 +78,7 @@ export async function loadClassifier(meta: ModelMeta, onProgress: (pct: number) 
   const ctx = crop.getContext("2d", { willReadFrequently: true })!;
   ctx.imageSmoothingQuality = "high";
 
-  return async function classify(video: HTMLVideoElement, box: Box): Promise<Prediction> {
+  async function classify(video: HTMLVideoElement, box: Box): Promise<Prediction> {
     // kare kutuyu kırp; görüntü dışında kalan kısım siyah kalır (PIL.crop ile aynı)
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, S, S);
@@ -99,7 +101,9 @@ export async function loadClassifier(meta: ModelMeta, onProgress: (pct: number) 
     const probs = Object.fromEntries(ORDER.map((c) => [c, exp[meta.classes.indexOf(c)] / sum])) as Record<Label, number>;
     const label = ORDER.reduce((a, b) => (probs[b] > probs[a] ? b : a));
     return { probs, label, conf: probs[label] };
-  };
+  }
+  // model değiştirilince eski oturumun belleğini bırak (telefonda üç model birden sığmayabilir)
+  return { classify, release: () => session.release() as Promise<void> };
 }
 
 export function handBox(landmarks: { x: number; y: number }[], vw: number, vh: number, margin: number): Box {

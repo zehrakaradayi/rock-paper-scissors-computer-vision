@@ -26,5 +26,6 @@
   "params": 25633219,
   "test_macro_f1": 0.9866613311991462,
   "int8_test_macro_f1": 0.9866613311991462,
-  "file": "/models/model_a.int8.onnx"
+  "file": "/models/model_a.int8.onnx",
+  "zor_macro_f1": 0.71
 }
