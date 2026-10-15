@@ -146,3 +146,13 @@ Aynı train / val / test bölünmesi, aynı augmentation, aynı normalizasyon (I
 
   Ayrıca: el yokken "Elini kameraya göster", kamera izni reddedilince "Kameraya erişilemedi. Lütfen izin ver.",
   390 px telefon ekranında yatay taşma yok.
+- **GitHub:** https://github.com/zehrakaradayi/rock-paper-scissors-computer-vision (main)
+- **Vercel (canlı):** https://web-zehra7.vercel.app — Root Directory `web`, environment variable yok.
+  Vercel'in varsayılan "Vercel Authentication" koruması kapatıldı (açıkken link sadece Vercel hesabıyla açılıyordu).
+- Canlı sitede headless Chromium + sahte kamera testi (390 px telefon ekranı, Model A int8):
+
+  | Fotoğraf | Canlı site |
+  |---|---|
+  | Taş | Taş %96 |
+  | Kağıt | Kağıt %93 |
+  | Makas | Makas %97 |
