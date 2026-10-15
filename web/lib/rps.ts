@@ -23,14 +23,17 @@ type Landmarker = {
   detectForVideo(video: HTMLVideoElement, ts: number): { landmarks: { x: number; y: number }[][] };
 };
 
+// Uygulama bir alt yolda (ör. code-server proxy'si) çalışıyorsa public/ dosyalarının öneki
+export const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+
 // public/ altındaki ES modüllerini paketleyiciye dokundurmadan yükle
 const load = (url: string) => import(/* webpackIgnore: true */ url);
 
 export async function loadHandLandmarker(): Promise<Landmarker> {
-  const { FilesetResolver, HandLandmarker } = await load("/mediapipe/vision_bundle.mjs");
-  const files = await FilesetResolver.forVisionTasks("/mediapipe/wasm");
+  const { FilesetResolver, HandLandmarker } = await load(BASE + "/mediapipe/vision_bundle.mjs");
+  const files = await FilesetResolver.forVisionTasks(BASE + "/mediapipe/wasm");
   const options = (delegate: "GPU" | "CPU") => ({
-    baseOptions: { modelAssetPath: "/models/hand_landmarker.task", delegate },
+    baseOptions: { modelAssetPath: BASE + "/models/hand_landmarker.task", delegate },
     runningMode: "VIDEO",
     numHands: 1,
   });
@@ -42,11 +45,11 @@ export async function loadHandLandmarker(): Promise<Landmarker> {
 }
 
 export async function loadClassifier(meta: ModelMeta, onProgress: (pct: number) => void) {
-  const ort = await load("/ort/ort.wasm.bundle.min.mjs");
-  ort.env.wasm.wasmPaths = "/ort/";
+  const ort = await load(BASE + "/ort/ort.wasm.bundle.min.mjs");
+  ort.env.wasm.wasmPaths = BASE + "/ort/";
   ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.min(4, navigator.hardwareConcurrency || 1) : 1;
 
-  const res = await fetch(meta.file);
+  const res = await fetch(BASE + meta.file);
   if (!res.ok || !res.body) throw new Error(`model indirilemedi (${res.status})`);
   const total = Number(res.headers.get("Content-Length")) || 0;
   const reader = res.body.getReader();

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { handBox, loadClassifier, loadHandLandmarker, NAMES, ORDER, type Box, type ModelMeta, type Prediction } from "@/lib/rps";
+import { BASE, handBox, loadClassifier, loadHandLandmarker, NAMES, ORDER, type Box, type ModelMeta, type Prediction } from "@/lib/rps";
 
 const COLORS = { rock: "#c2410c", paper: "#1d4ed8", scissors: "#15803d" } as const;
 
@@ -25,7 +25,7 @@ export default function RpsCamera() {
       let m: ModelMeta, landmarker: Awaited<ReturnType<typeof loadHandLandmarker>>;
       let classify: Awaited<ReturnType<typeof loadClassifier>>;
       try {
-        m = await (await fetch("/models/model_a.json")).json();
+        m = await (await fetch(BASE + "/models/model_a.json")).json();
         setMeta(m);
         [landmarker, classify] = await Promise.all([
           loadHandLandmarker(),
