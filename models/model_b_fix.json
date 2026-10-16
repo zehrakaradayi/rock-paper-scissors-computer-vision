@@ -1,0 +1,43 @@
+{
+  "name": "model_b_fix",
+  "classes": [
+    "paper",
+    "rock",
+    "scissors"
+  ],
+  "classes_tr": [
+    "Kağıt",
+    "Taş",
+    "Makas"
+  ],
+  "input_size": 224,
+  "mean": [
+    0.485,
+    0.456,
+    0.406
+  ],
+  "std": [
+    0.229,
+    0.224,
+    0.225
+  ],
+  "crop_margin": 1.4,
+  "int8_test_macro_f1": 0.9850671976107517,
+  "title": "Model B — düzeltilmiş (ödev)",
+  "params": 27822435,
+  "test": {
+    "macro_f1": 1.0,
+    "per_class_f1": {
+      "paper": 1.0,
+      "rock": 1.0,
+      "scissors": 1.0
+    }
+  },
+  "zor": {
+    "Eski test (70)": 1.0,
+    "Zor: asagi (27)": 0.617,
+    "Zor: cizgili (30)": 0.865,
+    "Zor: yuz (30)": 0.861,
+    "Zor: hepsi (87)": 0.797
+  }
+}

@@ -14,6 +14,7 @@ from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
+matplotlib.rcParams["pdf.fonttype"] = 42  # TrueType: Type 3 fontları gösteremeyen PDF okuyucular için
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import timm  # noqa: E402

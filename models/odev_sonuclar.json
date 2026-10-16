@@ -1,0 +1,37 @@
+{
+  "Önce: Model B": {
+    "Eski test (70)": 1.0,
+    "Zor: asagi (27)": 0.438,
+    "Zor: cizgili (30)": 0.753,
+    "Zor: yuz (30)": 0.771,
+    "Zor: hepsi (87)": 0.69
+  },
+  "Düzeltme 1: döndürme ±180°": {
+    "Eski test (70)": 1.0,
+    "Zor: asagi (27)": 0.506,
+    "Zor: cizgili (30)": 0.898,
+    "Zor: yuz (30)": 0.725,
+    "Zor: hepsi (87)": 0.732
+  },
+  "Düzeltme 1b: + parmaklar aşağı fotoğrafları": {
+    "Eski test (70)": 1.0,
+    "Zor: asagi (27)": 0.619,
+    "Zor: cizgili (30)": 0.869,
+    "Zor: yuz (30)": 0.895,
+    "Zor: hepsi (87)": 0.81
+  },
+  "Düzeltme 2: + yüz/saç fotoğrafları": {
+    "Eski test (70)": 0.985,
+    "Zor: asagi (27)": 0.771,
+    "Zor: cizgili (30)": 0.9,
+    "Zor: yuz (30)": 0.933,
+    "Zor: hepsi (87)": 0.872
+  },
+  "Düzeltme 3: + çizgili duvar fotoğrafları": {
+    "Eski test (70)": 1.0,
+    "Zor: asagi (27)": 0.617,
+    "Zor: cizgili (30)": 0.865,
+    "Zor: yuz (30)": 0.861,
+    "Zor: hepsi (87)": 0.797
+  }
+}
